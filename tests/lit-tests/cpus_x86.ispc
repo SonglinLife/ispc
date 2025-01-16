@@ -21,8 +21,8 @@
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=skylake
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=znver1
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=znver2
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=znver3
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=ps5
-//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=knl
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=skx
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=icelake-client
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=icl
@@ -30,6 +30,8 @@
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=icx
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=tigerlake
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=tgl
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=alderlake
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse2-i32x4 --cpu=adl
 
 // REQUIRES: X86_ENABLED
 

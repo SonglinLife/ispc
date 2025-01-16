@@ -1,37 +1,9 @@
 ;;
 ;; target-neon-32-x2.ll
 ;;
-;;  Copyright(c) 2019 Intel
+;;  Copyright(c) 2019-2024 Intel
 ;;
-;;  All rights reserved.
-;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Matt Pharr nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 define(`WIDTH',`8')
 define(`MASK',`i32')
@@ -300,14 +272,14 @@ define float @__reduce_add_float(<8 x float>) nounwind readnone alwaysinline {
 
 define float @__reduce_min_float(<8 x float>) nounwind readnone alwaysinline {
   v8tov4(float, %0, %v0123, %v4567)
-  %x = call <4 x float> @llvm.aarch64.neon.fmin.v4f32(<4 x float> %v0123, <4 x float> %v4567)
+  %x = call <4 x float> @llvm.minnum.f32.v4f32(<4 x float> %v0123, <4 x float> %v4567)
   %r = call float @llvm.aarch64.neon.fminv.f32.v4f32(<4 x float> %x)
   ret float %r
 }
 
 define float @__reduce_max_float(<8 x float>) nounwind readnone alwaysinline {
   v8tov4(float, %0, %v0123, %v4567)
-  %x = call <4 x float> @llvm.aarch64.neon.fmax.v4f32(<4 x float> %v0123, <4 x float> %v4567)
+  %x = call <4 x float> @llvm.maxnum.f32.v4f32(<4 x float> %v0123, <4 x float> %v4567)
   %r = call float @llvm.aarch64.neon.fmaxv.f32.v4f32(<4 x float> %x)
   ret float %r
 }
@@ -761,8 +733,54 @@ define <8 x i16> @__psubus_vi16(<8 x i16>, <8 x i16>) {
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; reciprocals in double precision, if supported
 
-rsqrtd_decl()
-rcpd_decl()
 
-transcendetals_decl()
-trigonometry_decl()
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; rcp/rsqrt declarations for half
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; dot product
+
+declare <4 x i32> @NEON_PREFIX_UDOT.v4i32.v16i8(<4 x i32>, <16 x i8>, <16 x i8>) nounwind readnone
+define <8 x i32> @__dot4add_u8u8packed(<8 x i32> %a, <8 x i32> %b, <8 x i32> %acc) nounwind readnone alwaysinline {
+  v8tov4(i32, %a, %a0, %a1)
+  v8tov4(i32, %b, %b0, %b1)
+  v8tov4(i32, %acc, %acc0, %acc1)
+  %a0_cast = bitcast <4 x i32> %a0 to <16 x i8>
+  %b0_cast = bitcast <4 x i32> %b0 to <16 x i8>
+  %a1_cast = bitcast <4 x i32> %a1 to <16 x i8>
+  %b1_cast = bitcast <4 x i32> %b1 to <16 x i8>
+  %ret0 = call <4 x i32> @NEON_PREFIX_UDOT.v4i32.v16i8(<4 x i32> %acc0, <16 x i8> %a0_cast, <16 x i8> %b0_cast)
+  %ret1 = call <4 x i32> @NEON_PREFIX_UDOT.v4i32.v16i8(<4 x i32> %acc1, <16 x i8> %a1_cast, <16 x i8> %b1_cast)
+  v4tov8(i32, %ret0, %ret1, %ret)
+  ret <8 x i32> %ret
+}
+
+declare <4 x i32> @NEON_PREFIX_SDOT.v4i32.v16i8(<4 x i32>, <16 x i8>, <16 x i8>) nounwind readnone
+define <8 x i32> @__dot4add_i8i8packed(<8 x i32> %a, <8 x i32> %b, <8 x i32> %acc) nounwind readnone alwaysinline {
+  v8tov4(i32, %a, %a0, %a1)
+  v8tov4(i32, %b, %b0, %b1)
+  v8tov4(i32, %acc, %acc0, %acc1)
+  %a0_cast = bitcast <4 x i32> %a0 to <16 x i8>
+  %b0_cast = bitcast <4 x i32> %b0 to <16 x i8>
+  %a1_cast = bitcast <4 x i32> %a1 to <16 x i8>
+  %b1_cast = bitcast <4 x i32> %b1 to <16 x i8>
+  %ret0 = call <4 x i32> @NEON_PREFIX_SDOT.v4i32.v16i8(<4 x i32> %acc0, <16 x i8> %a0_cast, <16 x i8> %b0_cast)
+  %ret1 = call <4 x i32> @NEON_PREFIX_SDOT.v4i32.v16i8(<4 x i32> %acc1, <16 x i8> %a1_cast, <16 x i8> %b1_cast)
+  v4tov8(i32, %ret0, %ret1, %ret)
+  ret <8 x i32> %ret
+}
+
+declare <4 x i32> @NEON_PREFIX_USDOT.v4i32.v16i8(<4 x i32>, <16 x i8>, <16 x i8>) nounwind readnone
+define <8 x i32> @__dot4add_u8i8packed(<8 x i32> %a, <8 x i32> %b, <8 x i32> %acc) nounwind readnone alwaysinline {
+  v8tov4(i32, %a, %a0, %a1)
+  v8tov4(i32, %b, %b0, %b1)
+  v8tov4(i32, %acc, %acc0, %acc1)
+  %a0_cast = bitcast <4 x i32> %a0 to <16 x i8>
+  %b0_cast = bitcast <4 x i32> %b0 to <16 x i8>
+  %a1_cast = bitcast <4 x i32> %a1 to <16 x i8>
+  %b1_cast = bitcast <4 x i32> %b1 to <16 x i8>
+  %ret0 = call <4 x i32> @NEON_PREFIX_USDOT.v4i32.v16i8(<4 x i32> %acc0, <16 x i8> %a0_cast, <16 x i8> %b0_cast)
+  %ret1 = call <4 x i32> @NEON_PREFIX_USDOT.v4i32.v16i8(<4 x i32> %acc1, <16 x i8> %a1_cast, <16 x i8> %b1_cast)
+  v4tov8(i32, %ret0, %ret1, %ret)
+  ret <8 x i32> %ret
+}

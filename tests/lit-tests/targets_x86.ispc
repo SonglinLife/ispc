@@ -6,6 +6,10 @@
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4-i16x8
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4-i32x4
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4-i32x8
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4.1-i8x16
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4.1-i16x8
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4.1-i32x4
+//; RUN: %{ispc} %s -o %t.o --nostdlib --target=sse4.1-i32x8
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx1-i32x4
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx1-i32x8
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx1-i32x16
@@ -16,8 +20,6 @@
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx2-i32x8
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx2-i32x16
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx2-i64x4
-//; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx512knl-x16
-//; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx512knl-i32x16
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx512skx-x4
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx512skx-i32x4
 //; RUN: %{ispc} %s -o %t.o --nostdlib --target=avx512skx-x8

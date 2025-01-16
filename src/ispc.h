@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2025, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file ispc.h
@@ -59,15 +32,19 @@
 #include <string>
 #include <vector>
 
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_14_0
 #include <llvm/ADT/APFloat.h>
-#endif
 #include <llvm/ADT/StringRef.h>
 
 /** @def ISPC_MAX_NVEC maximum vector size of any of the compliation
     targets.
  */
 #define ISPC_MAX_NVEC 64
+
+// Number of first construction phase
+#define PRE_OPT_NUMBER 0
+
+// Number of initial optimization phase
+#define INIT_OPT_NUMBER 10
 
 // Number of final optimization phase
 #define LAST_OPT_NUMBER 1000
@@ -106,14 +83,21 @@ class FunctionEmitContext;
 class Expr;
 class ExprList;
 class Function;
+class FunctionTemplate;
 class FunctionType;
 class Module;
 class PointerType;
 class Stmt;
 class Symbol;
 class SymbolTable;
+class TemplateArg;
+class TemplateInstantiation;
+class TemplateParam;
+class TemplateParms;
+class TemplateSymbol;
 class Type;
 struct VariableDeclaration;
+typedef std::vector<TemplateArg> TemplateArgs;
 
 enum StorageClass { SC_NONE, SC_EXTERN, SC_STATIC, SC_TYPEDEF, SC_EXTERN_C, SC_EXTERN_SYCL };
 
@@ -134,7 +118,7 @@ enum class AddressSpace {
     lexing code).  Both lines and columns are counted starting from one.
  */
 struct SourcePos {
-    SourcePos(const char *n = NULL, int fl = 0, int fc = 0, int ll = 0, int lc = 0);
+    SourcePos(const char *n = nullptr, int fl = 0, int fc = 0, int ll = 0, int lc = 0);
 
     const char *name;
     int first_line;
@@ -158,6 +142,42 @@ struct SourcePos {
     extents. */
 SourcePos Union(const SourcePos &p1, const SourcePos &p2);
 
+typedef unsigned int PerfWarningTypeUnderlyingType;
+
+/** An enum to represent different types of perfarmance warnings that should be triggered for specific target */
+enum class PerfWarningType : PerfWarningTypeUnderlyingType {
+    // x86, SSE2/SSE4/AVX/AVX2.
+    // Converts between [float|double] and uint[32|64] types (both directions) are much more expensive than similar
+    // converts involving signed integers.
+    CVTUIntFloat = 0x1,
+    // x86, AVX2.
+    // Converts between float16 and uint[32|64] types (both directions) are much more expensive than similar
+    // converts involving signed integers.
+    // SSE2/SSE4/AVX does not warn about FP16, as it is extreamly slow due to emulation of any FP16 ops.
+    CVTUIntFloat16 = 0x2,
+    // x86
+    // Varying integer division and modulo operations are not supported in hardware and are scalarized.
+    DIVModInt = 0x4,
+    // x86, SSE2, SSE4.
+    // Shift right by variable amount.
+    VariableShiftRight = 0x8,
+};
+
+/** Code model */
+enum class MCModel {
+    Default, /** default model - i.e. not specified on the command line */
+    Small,   /** small model */
+    Large,   /** large model */
+};
+
+/** PIC level. It corresponds to llvm::PICLevel. */
+enum class PICLevel {
+    Default,  /** default model - i.e. not specified on the command line */
+    NotPIC,   /** not PIC */
+    SmallPIC, /** small PIC */
+    BigPIC,   /** big PIC */
+};
+
 /** @brief Structure that defines a compilation target
 
     This structure defines a compilation target for the ispc compiler.
@@ -167,18 +187,22 @@ class Target {
     /** Enumerator giving the instruction sets that the compiler can
         target.  These should be ordered from "worse" to "better" in that
         if a processor supports multiple target ISAs, then the most
-        flexible/performant of them will apear last in the enumerant.  Note
+        flexible/performant of them will appear last in the enumeration.  Note
         also that __best_available_isa() needs to be updated if ISAs are
         added or the enumerant values are reordered.  */
     enum ISA {
         SSE2 = 0,
-        SSE4 = 1,
-        AVX = 2,
+        SSE41 = 1,
+        SSE42 = 2,
+        AVX = 3,
         // Not supported anymore. Use either AVX or AVX2.
-        // AVX11 = 3,
-        AVX2 = 3,
-        KNL_AVX512 = 4,
-        SKX_AVX512 = 5,
+        // AVX11 = 4,
+        AVX2 = 4,
+        AVX2VNNI = 5,
+        KNL_AVX512 = 6,
+        SKX_AVX512 = 7,
+        ICL_AVX512 = 8,
+        SPR_AVX512 = 9,
 #ifdef ISPC_ARM_ENABLED
         NEON,
 #endif
@@ -190,6 +214,9 @@ class Target {
         XELP,
         XEHPG,
         XEHPC,
+        XELPG,
+        XE2HPG,
+        XE2LPG,
 #endif
         NUM_ISAS
     };
@@ -199,6 +226,9 @@ class Target {
         gen9,
         xe_lp,
         xe_hpg,
+        xe_lpg,
+        xe2_hpg,
+        xe2_lpg,
         xe_hpc,
     };
 #endif
@@ -206,7 +236,15 @@ class Target {
     /** Initializes the given Target pointer for a target of the given
         name, if the name is a known target.  Returns true if the
         target was initialized and false if the name is unknown. */
-    Target(Arch arch, const char *cpu, ISPCTarget isa, bool pic, bool printTarget);
+    Target(Arch arch, const char *cpu, ISPCTarget isa, PICLevel picLevel, MCModel code_model, bool printTarget);
+
+    ~Target();
+
+    // We don't copy Target objects at the moment. If we will then proper
+    // implementations are needed considering the ownership of heap-allocated
+    // fields like m_dataLayout.
+    Target(const Target &) = delete;
+    Target &operator=(const Target &) = delete;
 
     /** Check if LLVM intrinsic is supported for the current target. */
     bool checkIntrinsticSupport(llvm::StringRef name, SourcePos pos);
@@ -235,6 +273,9 @@ class Target {
     /** Returns a string like "avx2-i32x8" encoding the target.
         This may be used for Target initialization. */
     const char *GetISATargetString() const;
+
+    /** Return the suffix to use for target-specific functions.  */
+    std::string GetTargetSuffix();
 
     /** Returns the size of the given type */
     llvm::Value *SizeOf(llvm::Type *type, llvm::BasicBlock *insertAtEnd);
@@ -271,7 +312,8 @@ class Target {
 
     bool isXeTarget() {
 #ifdef ISPC_XE_ENABLED
-        return m_isa == Target::GEN9 || m_isa == Target::XELP || m_isa == Target::XEHPG || m_isa == Target::XEHPC;
+        return m_isa == Target::GEN9 || m_isa == Target::XELP || m_isa == Target::XEHPG || m_isa == Target::XEHPC ||
+               m_isa == Target::XELPG || m_isa == Target::XE2HPG || m_isa == Target::XE2LPG;
 #else
         return false;
 #endif
@@ -297,19 +339,33 @@ class Target {
 
     int getVectorWidth() const { return m_vectorWidth; }
 
-    bool getGeneratePIC() const { return m_generatePIC; }
+    PICLevel getPICLevel() const { return m_picLevel; }
+
+    MCModel getMCModel() const { return m_codeModel; }
 
     bool getMaskingIsFree() const { return m_maskingIsFree; }
 
     int getMaskBitCount() const { return m_maskBitCount; }
 
-    bool hasHalf() const { return m_hasHalf; }
+    bool hasDotProductVNNI() const { return m_hasDotProductVNNI; }
+
+    bool hasDotProductARM() const { return m_hasDotProductARM; }
+
+    bool hasI8MatrixMulARM() const { return m_hasI8MatrixMulARM; }
+
+    bool hasHalfConverts() const { return m_hasHalfConverts; }
+
+    bool hasHalfFullSupport() const { return m_hasHalfFullSupport; }
 
     bool hasRand() const { return m_hasRand; }
 
     bool hasGather() const { return m_hasGather; }
 
+    bool useGather() const;
+
     bool hasScatter() const { return m_hasScatter; }
+
+    bool useScatter() const;
 
     bool hasTranscendentals() const { return m_hasTranscendentals; }
 
@@ -327,17 +383,18 @@ class Target {
 
     bool hasFp64Support() const { return m_hasFp64Support; }
 
-    bool warnFtoU32IsExpensive() const { return m_warnFtoU32IsExpensive; }
+    void setWarning(PerfWarningType warningType) { m_warnings |= static_cast<unsigned int>(warningType); }
+
+    bool shouldWarn(PerfWarningType warningType) { return (m_warnings & static_cast<unsigned int>(warningType)) != 0; }
 
   private:
     /** llvm Target object representing this target. */
     const llvm::Target *m_target;
 
-    /** llvm TargetMachine.
-        Note that it's not destroyed during Target destruction, as
-        Module::CompileAndOutput() uses TargetMachines after Target is destroyed.
-        This needs to be changed. */
+    /** llvm TargetMachine. Deconstrcted in ~Target. */
     llvm::TargetMachine *m_targetMachine;
+
+    /** This is deconstructed in ~Target. */
     llvm::DataLayout *m_dataLayout;
 
     /** flag to report invalid state after construction
@@ -391,7 +448,10 @@ class Target {
     int m_vectorWidth;
 
     /** Indicates whether position independent code should be generated. */
-    bool m_generatePIC;
+    PICLevel m_picLevel;
+
+    /** Code model */
+    MCModel m_codeModel;
 
     /** Is there overhead associated with masking on the target
         architecture; e.g. there is on SSE, due to extra blends and the
@@ -403,9 +463,30 @@ class Target {
         is 32 on SSE/AVX, since that matches the HW better. */
     int m_maskBitCount;
 
-    /** Indicates whether the target has native support for float/half
-        conversions. */
-    bool m_hasHalf;
+    /** Indicates whether the target has native support for VNNI dot product.
+     *  Supported data types are: signed/unsigned i8 and i16 with and without saturation
+     */
+    bool m_hasDotProductVNNI;
+
+    /** Indicates whether the target has native support for ARM dot product.
+     *  Supported data types are: signed/signed i8 and unsigned/unsigned i8
+     */
+    bool m_hasDotProductARM;
+
+    /** Indicates whether the target has support for i8 matrix multiplication
+     *  that required for dot product of i8 mixed-sign types.
+     */
+    bool m_hasI8MatrixMulARM;
+
+    /** Indicates whether the target has native support for float/half conversions. */
+    bool m_hasHalfConverts;
+
+    /** Indicates whether the target has full native support for float16 type, i.e.
+        arithmetic operations, rsqrt, rcp, etc.
+        TODO: this needs to be merged with m_hasFp16Support eventually, but we need to
+              define proper ARM targets with and without FP16 support first.
+    */
+    bool m_hasHalfFullSupport;
 
     /** Indicates whether there is an ISA random number instruction. */
     bool m_hasRand;
@@ -441,8 +522,8 @@ class Target {
     /** Indicates whether the target has FP64 support. */
     bool m_hasFp64Support;
 
-    /** Indicates whether the target has uint32 -> float cvt support **/
-    bool m_warnFtoU32IsExpensive;
+    /** A bitset of PerfWarningType values indicating the warnings that are relevant for the target. */
+    PerfWarningTypeUnderlyingType m_warnings;
 };
 
 /** @brief Structure that collects optimization options
@@ -454,8 +535,8 @@ struct Opt {
     Opt();
 
     /** Optimization level.  Currently, the only valid values are 0,
-        indicating essentially no optimization, and 1, indicating as much
-        optimization as possible. */
+        indicating essentially no optimization, 1, indicating optimization for size,
+        and 2, indicating as much optimization as possible. */
     int level;
 
     /** Indicates whether "fast and loose" numerically unsafe optimizations
@@ -482,6 +563,14 @@ struct Opt {
         performance in the generated code). */
     bool disableAsserts;
 
+    /** Indicates whether gathers should be disabled for the targets that support them (for
+        performance in the generated code). */
+    bool disableGathers;
+
+    /** Indicates whether scatters should be disabled for the targets that support them (for
+        performance in the generated code). */
+    bool disableScatters;
+
     /** Indicates whether FMA instructions should be disabled (on targets
         that support them). */
     bool disableFMA;
@@ -491,6 +580,12 @@ struct Opt {
         becomes a vector load/store will be a cache-aligned sequence of
         locations. */
     bool forceAlignedMemory;
+
+    /** If enabled, enables LoadStoreVectorizerPass in ISPC optimization pipeline. */
+    bool enableLoadStoreVectorizer;
+
+    /** If enabled, enables SLPVectorizerPass in ISPC optimization pipeline. */
+    bool enableSLPVectorizer;
 
     /** If enabled, disables the various optimizations that kick in when
         the execution mask can be determined to be "all on" at compile
@@ -572,10 +667,6 @@ struct Opt {
         the default value should be adjusted with some experiments. */
     int thresholdForXeGatherCoalescing;
 
-    /** Experimental: Xe gather coalescing will generate standard
-        vectorized llvm loads instead of block ld intrinsics. */
-    bool buildLLVMLoadsOnXeGatherCoalescing;
-
     /** Enables experimental support of foreach statement inside varying CF.
         Current implementation brings performance degradation due to ineffective
         implementation of unmasked.*/
@@ -626,7 +717,7 @@ struct Globals {
     MathLib mathLib;
 
     /** Optimization level to be specified while creating TargetMachine. */
-    enum class CodegenOptLevel { None, Aggressive };
+    enum class CodegenOptLevel { None, Default, Aggressive };
     CodegenOptLevel codegenOptLevel;
 
     /** Records whether the ispc standard library should be made available
@@ -636,6 +727,10 @@ struct Globals {
     /** Indicates whether the C pre-processor should be run over the
         program source before compiling it.  (Default is true.) */
     bool runCPP;
+
+    /** Indicates whether the compiler places each function in its own
+        section. */
+    bool functionSections;
 
     /** When \c true, only runs the C pre-processor. (Default is false.) */
     bool onlyCPP;
@@ -648,12 +743,21 @@ struct Globals {
         ispc's execution. */
     bool debugPrint;
 
+    /** When \c true, print verbose output from PassManager.
+     * (Default is false.)
+     */
+    bool debugPM;
+
+    /** When \c true, print time trace output from PassManager.
+     * (Default is false.)
+     */
+    bool debugPMTimeTrace;
+
     /** When \c true, dump AST.
         None - don't dump AST
-        User - dump AST only for user code, but not for stdlib functions
         All - dump AST for all the code
     */
-    enum class ASTDumpKind { None, User, All };
+    enum class ASTDumpKind { None, All };
     ASTDumpKind astDump;
 
     /** When \c true, target ISA will be printed during ispc's execution. */
@@ -668,8 +772,17 @@ struct Globals {
     /** Whether to dump IR to file. */
     bool dumpFile;
 
+    /** Whether we are in special mode of generating IR for stdlib. */
+    bool genStdlib;
+
+    /** Whether ISPC binary is slim. */
+    bool isSlimBinary;
+
     /** Store the path to directory for IR file dumps. */
     std::string dumpFilePath;
+
+    /** Store the absolute path to share/ispc directory. */
+    std::string shareDirPath;
 
     /** Indicates after which optimization we want to generate
         DebugIR information. */
@@ -683,6 +796,12 @@ struct Globals {
 
     /** Indicates whether warnings should be issued as errors. */
     bool warningsAsErrors;
+
+    /** Preserve wrap-around on signed integer overflow by disabling the
+        nsw attribute when emitting arithmetic for signed integer
+        expressions.  Without this disabled, the compiler may rely on UB
+        behavior for optimizations on signed integer types.  */
+    bool wrapSignedInt;
 
     /** Indicates whether line wrapping of error messages to the terminal
         width should be disabled. */
@@ -720,8 +839,12 @@ struct Globals {
         program in its output. */
     bool generateDebuggingSymbols;
 
-    /** Require generation of DWARF of certain version (2, 3, 4). For
-        default version, this field is set to 0. */
+    /** Debug info type to generate. */
+    enum class DebugInfoType { None = 0, DWARF, CodeView };
+    DebugInfoType debugInfoType;
+
+    /** Require generation of DWARF of certain version (2, 3, 4, 5). For
+        default version, this field is set to 3. */
     // Hint: to verify dwarf version in the object file, run on Linux:
     // readelf --debug-dump=info object.o | grep -A 2 'Compilation Unit @'
     // on Mac:
@@ -732,16 +855,8 @@ struct Globals {
         vector width to them. */
     bool mangleFunctionsWithTarget;
 
-    /** If enabled, the lexer will randomly replace some tokens returned
-        with other tokens, in order to test error condition handling in the
-        compiler. */
-    bool enableFuzzTest;
-
     /* If enabled, allows the user to directly call LLVM intrinsics. */
     bool enableLLVMIntrinsics;
-
-    /** Seed for random number generator used for fuzz testing. */
-    int fuzzTestSeed;
 
     /** Global LLVMContext object */
     llvm::LLVMContext *ctx;
@@ -821,4 +936,52 @@ enum {
 
 extern Globals *g;
 extern Module *m;
+
+// Singleton object for bookkeeping heap objects to destroy them later to
+// avoid memory leak.
+class BookKeeper {
+  private:
+    BookKeeper() {}
+
+    template <typename T> std::vector<T *> &getStorage() {
+        // Vector to store bookkeeped objects.
+        static std::vector<T *> v;
+        return v;
+    }
+
+    template <typename T> void freeOne() {
+        std::vector<T *> &v = getStorage<T>();
+        for (auto e : v)
+            delete e;
+        v.clear();
+    }
+
+  public:
+    static BookKeeper &in();
+    BookKeeper(BookKeeper const &) = delete;
+    void operator=(BookKeeper const &) = delete;
+
+    template <typename T> void *add(T *p) {
+        std::vector<T *> &v = getStorage<T>();
+        v.push_back(p);
+        return p;
+    }
+
+    // Free all bookkeeped objects.
+    void freeAll();
+};
+
+// Base class to inherit for objects needed to be bookkeeped.
+class Traceable {
+  public:
+    void *operator new(size_t size) { return BookKeeper::in().add(static_cast<Traceable *>(::operator new(size))); }
+    virtual ~Traceable() = default;
+};
+
+// An enum class enumerating wrap semantic settings for use with BinaryOperator and other
+// signed arithmetic IR emitters in cases of signed overflow
+enum class WrapSemantics {
+    NSW = 0, // Do not preserve wraparound behavior
+    None = 1 // Preserve wraparound behavior
+};
 } // namespace ispc

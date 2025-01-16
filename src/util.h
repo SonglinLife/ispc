@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2021, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file util.h
@@ -54,6 +27,21 @@
 #ifdef ISPC_HOST_IS_WINDOWS
 int vasprintf(char **sptr, const char *fmt, va_list argv);
 int asprintf(char **sptr, const char *fmt, ...);
+#endif
+
+// LLVM 19.0+ uses a different API for insertion points, which is related to debug info representation. See more details
+// here: https://llvm.org/docs/RemoveDIsDebugInfo.html#how-to-update-existing-code
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_19_0
+#define ISPC_INSERTION_POINT_ITERATOR(iterator) iterator
+// Our utility functions that create llvm instructions are built with the assumption that insertBefore argument may be
+// null, which means that instruction needs not to be inserted into the IR. When this macro is removed, the interface of
+// these utility functions will need to be changed to accept either llvm::BasicBlock::iterator or llvm::InsertionPoint
+// instead of llvm::Instruction*, so null value may be passed without any trouble.
+#define ISPC_INSERTION_POINT_INSTRUCTION(instruction)                                                                  \
+    ((instruction) ? ((llvm::InsertPosition)instruction->getIterator()) : (llvm::InsertPosition) nullptr)
+#else
+#define ISPC_INSERTION_POINT_ITERATOR(iterator) &*iterator
+#define ISPC_INSERTION_POINT_INSTRUCTION(instruction) instruction
 #endif
 
 namespace ispc {
@@ -174,8 +162,8 @@ std::vector<std::string> MatchStrings(const std::string &str, const std::vector<
 /** Given the current working directory and a filename relative to that
     directory, this function returns the final directory that the resulting
     file is in and the base name of the file itself. */
-void GetDirectoryAndFileName(const std::string &currentDir, const std::string &relativeName, std::string *directory,
-                             std::string *filename);
+std::pair<std::string, std::string> GetDirectoryAndFileName(const std::string &currentDir,
+                                                            const std::string &relativeName);
 
 /** Verification routine, which ensures that DataLayout of the module being
     compiled is compatible with DataLayout of the library. At the moment we

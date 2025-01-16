@@ -7,25 +7,19 @@
 //; RUN: FileCheck --input-file=%t.avx2.s -check-prefix=CHECK_AVX2_ASM %s
 //; RUN: %{ispc} %s --emit-asm -o %t.avx512skx.s --nowrap --target=avx512skx-x16 2>&1 | FileCheck %s --allow-empty -check-prefix=CHECK_AVX512SKX_WARNING
 //; RUN: FileCheck --input-file=%t.avx512skx.s -check-prefix=CHECK_AVX512SKX_ASM %s
-//; RUN: %{ispc} %s --emit-asm -o %t.avx512knl.s --nowrap --target=avx512knl-x16 2>&1 | FileCheck %s --allow-empty -check-prefix=CHECK_AVX512KNL_WARNING
-//; RUN: FileCheck --input-file=%t.avx512knl.s -check-prefix=CHECK_AVX512KNL_ASM %s
 
 //; REQUIRES: X86_ENABLED
 
-//; CHECK_SSE2_WARNING: Performance Warning: Conversion from unsigned int to float is slow. Use "int" if possible
+//; CHECK_SSE2_WARNING: Performance Warning: Conversion from uint32 to float is slow. Use "int32" if possible
 //; CHECK_SSE2_ASM-NOT: vcvt
 
-//; CHECK_AVX2_WARNING: Performance Warning: Conversion from unsigned int to float is slow. Use "int" if possible
+//; CHECK_AVX2_WARNING: Performance Warning: Conversion from uint32 to float is slow. Use "int32" if possible
 //; CHECK_AVX2_ASM-NOT: vcvt
 
-//; CHECK_AVX512SKX_WARNING-NOT: Performance Warning: Conversion from unsigned int to float is slow. Use "int" if possible
+//; CHECK_AVX512SKX_WARNING-NOT: Performance Warning: Conversion from uint32 to float is slow. Use "int32" if possible
 //; CHECK_AVX512SKX_ASM: vcvt
 
-//; CHECK_AVX512KNL_WARNING-NOT: Performance Warning: Conversion from unsigned int to float is slow. Use "int" if possible
-//; CHECK_AVX512KNL_ASM: vcvt
-
-
-unmasked varying float test_uint_f( varying uint arg1)
+unmasked varying float test_uint_f(varying uint arg1)
 {
     varying float ret = (varying float) arg1;
     return ret;

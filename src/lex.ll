@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2021, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 %{
@@ -47,6 +20,7 @@ using namespace ispc;
 static uint64_t lParseBinary(const char *ptr, SourcePos pos, char **endPtr);
 static int lParseInteger(bool dotdotdot);
 static int lParseFP();
+static int lParseOperator(const char *ptr);
 static void lCComment(SourcePos *);
 static void lCppComment(SourcePos *);
 static void lNextValidChar(SourcePos *, char const*&);
@@ -56,7 +30,7 @@ static bool lConsumePragma(YYSTYPE *, SourcePos *);
 static void lHandleCppHash(SourcePos *);
 static void lStringConst(YYSTYPE *, SourcePos *);
 static double lParseHexFloat(const char *ptr);
-extern void RegisterDependency(const std::string &fileName);
+extern const char *RegisterDependency(const std::string &fileName);
 
 #define YY_USER_ACTION \
     yylloc.first_line = yylloc.last_line; \
@@ -68,36 +42,6 @@ inline int isatty(int) { return 0; }
 #else
 #include <unistd.h>
 #endif // ISPC_HOST_IS_WINDOWS
-
-static int allTokens[] = {
-  TOKEN_ASSERT, TOKEN_BOOL, TOKEN_BREAK, TOKEN_CASE,
-  TOKEN_CDO, TOKEN_CFOR, TOKEN_CIF, TOKEN_CWHILE,
-  TOKEN_CONST, TOKEN_CONTINUE, TOKEN_DEFAULT, TOKEN_DO,
-  TOKEN_DELETE, TOKEN_DOUBLE, TOKEN_ELSE, TOKEN_ENUM,
-  TOKEN_EXPORT, TOKEN_EXTERN, TOKEN_FALSE, TOKEN_FLOAT, TOKEN_FLOAT16, TOKEN_FOR,
-  TOKEN_FOREACH, TOKEN_FOREACH_ACTIVE, TOKEN_FOREACH_TILED,
-  TOKEN_FOREACH_UNIQUE, TOKEN_GOTO, TOKEN_IF, TOKEN_IN, TOKEN_INLINE,
-  TOKEN_INT, TOKEN_INT8, TOKEN_INT16, TOKEN_INT, TOKEN_INT64, TOKEN_LAUNCH,
-  TOKEN_UINT, TOKEN_UINT8, TOKEN_UINT16, TOKEN_UINT64,
-  TOKEN_NEW, TOKEN_NULL, TOKEN_PRINT, TOKEN_RETURN, TOKEN_SOA, TOKEN_SIGNED,
-  TOKEN_SIZEOF, TOKEN_ALLOCA, TOKEN_STATIC, TOKEN_STRUCT, TOKEN_SWITCH, TOKEN_SYNC,
-  TOKEN_TASK, TOKEN_TRUE, TOKEN_TYPEDEF, TOKEN_UNIFORM, TOKEN_UNMASKED,
-  TOKEN_UNSIGNED, TOKEN_VARYING, TOKEN_VOID, TOKEN_WHILE,
-  TOKEN_STRING_C_LITERAL, TOKEN_STRING_SYCL_LITERAL, TOKEN_DOTDOTDOT,
-  TOKEN_FLOAT_CONSTANT, TOKEN_FLOAT16_CONSTANT, TOKEN_DOUBLE_CONSTANT,
-  TOKEN_INT8_CONSTANT, TOKEN_UINT8_CONSTANT,
-  TOKEN_INT16_CONSTANT, TOKEN_UINT16_CONSTANT,
-  TOKEN_INT32_CONSTANT, TOKEN_UINT32_CONSTANT,
-  TOKEN_INT64_CONSTANT, TOKEN_UINT64_CONSTANT,
-  TOKEN_INC_OP, TOKEN_DEC_OP, TOKEN_LEFT_OP, TOKEN_RIGHT_OP, TOKEN_LE_OP,
-  TOKEN_GE_OP, TOKEN_EQ_OP, TOKEN_NE_OP, TOKEN_AND_OP, TOKEN_OR_OP,
-  TOKEN_MUL_ASSIGN, TOKEN_DIV_ASSIGN, TOKEN_MOD_ASSIGN, TOKEN_ADD_ASSIGN,
-  TOKEN_SUB_ASSIGN, TOKEN_LEFT_ASSIGN, TOKEN_RIGHT_ASSIGN, TOKEN_AND_ASSIGN,
-  TOKEN_XOR_ASSIGN, TOKEN_OR_ASSIGN, TOKEN_PTR_OP, TOKEN_NOINLINE, TOKEN_VECTORCALL,
-  TOKEN_REGCALL, TOKEN_INVOKE_SYCL,
-  ';', '{', '}', ',', ':', '=', '(', ')', '[', ']', '.', '&', '!', '~', '-',
-  '+', '*', '/', '%', '<', '>', '^', '|', '?',
-};
 
 std::map<int, std::string> tokenToName;
 std::map<std::string, std::string> tokenNameRemap;
@@ -147,6 +91,7 @@ void ParserInit() {
     tokenToName[TOKEN_UINT64] = "uint64";
     tokenToName[TOKEN_LAUNCH] = "launch";
     tokenToName[TOKEN_INVOKE_SYCL] = "invoke_sycl";
+    tokenToName[TOKEN_ATTRIBUTE] = "__attribute__";
     tokenToName[TOKEN_NEW] = "new";
     tokenToName[TOKEN_NULL] = "NULL";
     tokenToName[TOKEN_PRINT] = "print";
@@ -160,8 +105,10 @@ void ParserInit() {
     tokenToName[TOKEN_SWITCH] = "switch";
     tokenToName[TOKEN_SYNC] = "sync";
     tokenToName[TOKEN_TASK] = "task";
+    tokenToName[TOKEN_TEMPLATE] = "template";
     tokenToName[TOKEN_TRUE] = "true";
     tokenToName[TOKEN_TYPEDEF] = "typedef";
+    tokenToName[TOKEN_TYPENAME] = "typename";
     tokenToName[TOKEN_UNIFORM] = "uniform";
     tokenToName[TOKEN_UNMASKED] = "unmasked";
     tokenToName[TOKEN_UNSIGNED] = "unsigned";
@@ -274,6 +221,7 @@ void ParserInit() {
     tokenNameRemap["TOKEN_UINT64"] = "\'uint64\'";
     tokenNameRemap["TOKEN_LAUNCH"] = "\'launch\'";
     tokenNameRemap["TOKEN_INVOKE_SYCL"] = "\'invoke_sycl\'";
+    tokenNameRemap["TOKEN_ATTRIBUTE"] = "\'__attribute__\'";
     tokenNameRemap["TOKEN_NEW"] = "\'new\'";
     tokenNameRemap["TOKEN_NULL"] = "\'NULL\'";
     tokenNameRemap["TOKEN_PRINT"] = "\'print\'";
@@ -287,8 +235,10 @@ void ParserInit() {
     tokenNameRemap["TOKEN_SWITCH"] = "\'switch\'";
     tokenNameRemap["TOKEN_SYNC"] = "\'sync\'";
     tokenNameRemap["TOKEN_TASK"] = "\'task\'";
+    tokenNameRemap["TOKEN_TEMPLATE"] = "\'template\'";
     tokenNameRemap["TOKEN_TRUE"] = "\'true\'";
     tokenNameRemap["TOKEN_TYPEDEF"] = "\'typedef\'";
+    tokenNameRemap["TOKEN_TYPENAME"] = "\'typename\'";
     tokenNameRemap["TOKEN_UNIFORM"] = "\'uniform\'";
     tokenNameRemap["TOKEN_UNMASKED"] = "\'unmasked\'";
     tokenNameRemap["TOKEN_UNSIGNED"] = "\'unsigned\'";
@@ -333,40 +283,6 @@ void ParserInit() {
     tokenNameRemap["$end"] = "end of file";
 }
 
-
-inline int ispcRand() {
-#ifdef ISPC_HOST_IS_WINDOWS
-    return rand();
-#else
-    return lrand48();
-#endif
-}
-
-#define RT \
-    if (g->enableFuzzTest) { \
-        int r = ispcRand() % 40; \
-        if (r == 0) { \
-            Warning(yylloc, "Fuzz test dropping token"); \
-        } \
-        else if (r == 1) { \
-            Assert (tokenToName.size() > 0); \
-            int nt = sizeof(allTokens) / sizeof(allTokens[0]); \
-            int tn = ispcRand() % nt; \
-            yylval.stringVal = new std::string(yytext); /* just in case */\
-            Warning(yylloc, "Fuzz test replaced token with \"%s\"", tokenToName[allTokens[tn]].c_str()); \
-            return allTokens[tn]; \
-        } \
-        else if (r == 2) { \
-            Symbol *sym = m->symbolTable->RandomSymbol(); \
-            if (sym != NULL) { \
-                yylval.stringVal = new std::string(sym->name); \
-                Warning(yylloc, "Fuzz test replaced with identifier \"%s\".", sym->name.c_str()); \
-                return TOKEN_IDENTIFIER; \
-            } \
-        } \
-        /*  TOKEN_TYPE_NAME */ \
-     } else /* swallow semicolon */
-
 %}
 
 %option nounput
@@ -399,121 +315,121 @@ ZO_SWIZZLE ([01]+[w-z]+)+|([01]+[rgba]+)+|([01]+[uv]+)+
 }
 
 
-__assert { RT; return TOKEN_ASSERT; }
-bool { RT; return TOKEN_BOOL; }
-break { RT; return TOKEN_BREAK; }
-case { RT; return TOKEN_CASE; }
-cbreak { RT; Warning(yylloc, "\"cbreak\" is deprecated. Use \"break\"."); return TOKEN_BREAK; }
-ccontinue { RT; Warning(yylloc, "\"ccontinue\" is deprecated. Use \"continue\"."); return TOKEN_CONTINUE; }
-cdo { RT; return TOKEN_CDO; }
-cfor { RT; return TOKEN_CFOR; }
-cif { RT; return TOKEN_CIF; }
-cwhile { RT; return TOKEN_CWHILE; }
-const { RT; return TOKEN_CONST; }
-continue { RT; return TOKEN_CONTINUE; }
-creturn { RT; Warning(yylloc, "\"creturn\" is deprecated. Use \"return\"."); return TOKEN_RETURN; }
-__declspec { RT; return TOKEN_DECLSPEC; }
-default { RT; return TOKEN_DEFAULT; }
-do { RT; return TOKEN_DO; }
-delete { RT; return TOKEN_DELETE; }
-delete\[\] { RT; return TOKEN_DELETE; }
-double { RT; return TOKEN_DOUBLE; }
-else { RT; return TOKEN_ELSE; }
-enum { RT; return TOKEN_ENUM; }
-export { RT; return TOKEN_EXPORT; }
-extern { RT; return TOKEN_EXTERN; }
-false { RT; return TOKEN_FALSE; }
-float { RT; return TOKEN_FLOAT; }
-for { RT; return TOKEN_FOR; }
-foreach { RT; return TOKEN_FOREACH; }
-foreach_active { RT; return TOKEN_FOREACH_ACTIVE; }
-foreach_tiled { RT; return TOKEN_FOREACH_TILED; }
-foreach_unique { RT; return TOKEN_FOREACH_UNIQUE; }
-float16 { RT; return TOKEN_FLOAT16; }
-goto { RT; return TOKEN_GOTO; }
-if { RT; return TOKEN_IF; }
-in { RT; return TOKEN_IN; }
-inline { RT; return TOKEN_INLINE; }
-noinline { RT; return TOKEN_NOINLINE; }
-__vectorcall { RT; return TOKEN_VECTORCALL; }
-__regcall { RT; return TOKEN_REGCALL; }
-int { RT; return TOKEN_INT; }
-uint { RT; return TOKEN_UINT; }
-int8 { RT; return TOKEN_INT8; }
-uint8 { RT; return TOKEN_UINT8; }
-int16 { RT; return TOKEN_INT16; }
-uint16 { RT; return TOKEN_UINT16; }
-int32 { RT; return TOKEN_INT; }
-uint32 { RT; return TOKEN_UINT; }
-int64 { RT; return TOKEN_INT64; }
-uint64 { RT; return TOKEN_UINT64; }
-launch { RT; return TOKEN_LAUNCH; }
-invoke_sycl { RT; return TOKEN_INVOKE_SYCL; }
-new { RT; return TOKEN_NEW; }
-NULL { RT; return TOKEN_NULL; }
-print { RT; return TOKEN_PRINT; }
-return { RT; return TOKEN_RETURN; }
-soa { RT; return TOKEN_SOA; }
-signed { RT; return TOKEN_SIGNED; }
-sizeof { RT; return TOKEN_SIZEOF; }
-alloca { RT; return TOKEN_ALLOCA; }
-static { RT; return TOKEN_STATIC; }
-struct { RT; return TOKEN_STRUCT; }
-switch { RT; return TOKEN_SWITCH; }
-sync { RT; return TOKEN_SYNC; }
-task { RT; return TOKEN_TASK; }
-true { RT; return TOKEN_TRUE; }
-typedef { RT; return TOKEN_TYPEDEF; }
-uniform { RT; return TOKEN_UNIFORM; }
-unmasked { RT; return TOKEN_UNMASKED; }
-unsigned { RT; return TOKEN_UNSIGNED; }
-varying { RT; return TOKEN_VARYING; }
-void { RT; return TOKEN_VOID; }
-while { RT; return TOKEN_WHILE; }
-\"C\" { RT; return TOKEN_STRING_C_LITERAL; }
-\"SYCL\" { RT; return TOKEN_STRING_SYCL_LITERAL; }
-\.\.\. { RT; return TOKEN_DOTDOTDOT; }
+__assert { return TOKEN_ASSERT; }
+bool { return TOKEN_BOOL; }
+break { return TOKEN_BREAK; }
+case { return TOKEN_CASE; }
+cbreak { Warning(yylloc, "\"cbreak\" is deprecated. Use \"break\"."); return TOKEN_BREAK; }
+ccontinue { Warning(yylloc, "\"ccontinue\" is deprecated. Use \"continue\"."); return TOKEN_CONTINUE; }
+cdo { return TOKEN_CDO; }
+cfor { return TOKEN_CFOR; }
+cif { return TOKEN_CIF; }
+cwhile { return TOKEN_CWHILE; }
+const { return TOKEN_CONST; }
+continue { return TOKEN_CONTINUE; }
+creturn { Warning(yylloc, "\"creturn\" is deprecated. Use \"return\"."); return TOKEN_RETURN; }
+__declspec { return TOKEN_DECLSPEC; }
+default { return TOKEN_DEFAULT; }
+do { return TOKEN_DO; }
+delete { return TOKEN_DELETE; }
+delete\[\] { return TOKEN_DELETE; }
+double { return TOKEN_DOUBLE; }
+else { return TOKEN_ELSE; }
+enum { return TOKEN_ENUM; }
+export { return TOKEN_EXPORT; }
+extern { return TOKEN_EXTERN; }
+false { return TOKEN_FALSE; }
+float { return TOKEN_FLOAT; }
+for { return TOKEN_FOR; }
+foreach { return TOKEN_FOREACH; }
+foreach_active { return TOKEN_FOREACH_ACTIVE; }
+foreach_tiled { return TOKEN_FOREACH_TILED; }
+foreach_unique { return TOKEN_FOREACH_UNIQUE; }
+float16 { return TOKEN_FLOAT16; }
+goto { return TOKEN_GOTO; }
+if { return TOKEN_IF; }
+in { return TOKEN_IN; }
+inline { return TOKEN_INLINE; }
+noinline { return TOKEN_NOINLINE; }
+__vectorcall { return TOKEN_VECTORCALL; }
+__regcall { return TOKEN_REGCALL; }
+int { return TOKEN_INT; }
+uint { return TOKEN_UINT; }
+int8 { return TOKEN_INT8; }
+uint8 { return TOKEN_UINT8; }
+int16 { return TOKEN_INT16; }
+uint16 { return TOKEN_UINT16; }
+int32 { return TOKEN_INT; }
+uint32 { return TOKEN_UINT; }
+int64 { return TOKEN_INT64; }
+uint64 { return TOKEN_UINT64; }
+launch { return TOKEN_LAUNCH; }
+invoke_sycl { return TOKEN_INVOKE_SYCL; }
+__attribute__ { return TOKEN_ATTRIBUTE; }
+new { return TOKEN_NEW; }
+NULL { return TOKEN_NULL; }
+print { return TOKEN_PRINT; }
+return { return TOKEN_RETURN; }
+soa { return TOKEN_SOA; }
+signed { return TOKEN_SIGNED; }
+sizeof { return TOKEN_SIZEOF; }
+alloca { return TOKEN_ALLOCA; }
+static { return TOKEN_STATIC; }
+struct { return TOKEN_STRUCT; }
+switch { return TOKEN_SWITCH; }
+sync { return TOKEN_SYNC; }
+task { return TOKEN_TASK; }
+template { return TOKEN_TEMPLATE; }
+true { return TOKEN_TRUE; }
+typedef { return TOKEN_TYPEDEF; }
+typename { return TOKEN_TYPENAME; }
+uniform { return TOKEN_UNIFORM; }
+unmasked { return TOKEN_UNMASKED; }
+unsigned { return TOKEN_UNSIGNED; }
+varying { return TOKEN_VARYING; }
+void { return TOKEN_VOID; }
+while { return TOKEN_WHILE; }
+\"C\" { return TOKEN_STRING_C_LITERAL; }
+\"SYCL\" { return TOKEN_STRING_SYCL_LITERAL; }
+\.\.\. { return TOKEN_DOTDOTDOT; }
 
-"operator*"  { return TOKEN_IDENTIFIER; }
-"operator+"  { return TOKEN_IDENTIFIER; }
-"operator-"  { return TOKEN_IDENTIFIER; }
-"operator<<" { return TOKEN_IDENTIFIER; }
-"operator>>" { return TOKEN_IDENTIFIER; }
-"operator/" { return TOKEN_IDENTIFIER; }
-"operator%" { return TOKEN_IDENTIFIER; }
+"operator*"  { return lParseOperator(yytext); }
+"operator+"  { return lParseOperator(yytext); }
+"operator-"  { return lParseOperator(yytext); }
+"operator<<" { return lParseOperator(yytext); }
+"operator>>" { return lParseOperator(yytext); }
+"operator/"  { return lParseOperator(yytext); }
+"operator%"  { return lParseOperator(yytext); }
 
 L?\"(\\.|[^\\"])*\" { lStringConst(&yylval, &yylloc); return TOKEN_STRING_LITERAL; }
 
 {IDENT} {
-    RT;
     /* We have an identifier--is it a type name or an identifier?
        The symbol table will straighten us out... */
     yylval.stringVal = new std::string(yytext);
-    if (m->symbolTable->LookupType(yytext) != NULL)
+    if (m->symbolTable->LookupType(yytext) != nullptr)
         return TOKEN_TYPE_NAME;
+    else if (m->symbolTable->LookupFunctionTemplate(yytext))
+        return TOKEN_TEMPLATE_NAME;
     else
         return TOKEN_IDENTIFIER;
 }
 
 {INTRINSIC_CALL} {
-    RT;
     /* We have a potential llvm intrinsic call.*/
     yylval.stringVal = new std::string(yytext);
     return TOKEN_INTRINSIC_CALL;
 }
 
 {INT_NUMBER} {
-    RT;
     return lParseInteger(false);
 }
 
 {INT_NUMBER_DOTDOTDOT} {
-    RT;
     return lParseInteger(true);
 }
 
 {FORTRAN_DOUBLE_NUMBER} {
-    RT;
     {
       int i = 0;
       while (yytext[i] != 'd' && yytext[i] != 'D') i++;
@@ -524,24 +440,20 @@ L?\"(\\.|[^\\"])*\" { lStringConst(&yylval, &yylloc); return TOKEN_STRING_LITERA
 }
 
 {FLOAT_NUMBER_DECIMAL}|{FLOAT_NUMBER_SCIENTIFIC} {
-    RT;
     return lParseFP();
 }
 
 {FLOAT_NUMBER_DECIMAL_DEPRECATED} {
-    RT;
     Warning(yylloc, "single precision floating point literal should have a radix separator (dot)");
     return lParseFP();
 }
 
 {FLOAT_NUMBER_DECIMAL_ILLEGAL} {
-    RT;
     Error(yylloc, "floating point literal should have a radix separator (dot)");
     return lParseFP();
 }
 
 {FLOAT_NUMBER_HEXADECIMAL} {
-    RT;
     std::string val(yytext);
     std::string fp16S("f16");
     std::string fp16C("F16");
@@ -564,51 +476,51 @@ L?\"(\\.|[^\\"])*\" { lStringConst(&yylval, &yylloc); return TOKEN_STRING_LITERA
 
 
 
-"++" { RT; return TOKEN_INC_OP; }
-"--" { RT; return TOKEN_DEC_OP; }
-"<<" { RT; return TOKEN_LEFT_OP; }
-">>" { RT; return TOKEN_RIGHT_OP; }
-"<=" { RT; return TOKEN_LE_OP; }
-">=" { RT; return TOKEN_GE_OP; }
-"==" { RT; return TOKEN_EQ_OP; }
-"!=" { RT; return TOKEN_NE_OP; }
-"&&" { RT; return TOKEN_AND_OP; }
-"||" { RT; return TOKEN_OR_OP; }
-"*=" { RT; return TOKEN_MUL_ASSIGN; }
-"/=" { RT; return TOKEN_DIV_ASSIGN; }
-"%=" { RT; return TOKEN_MOD_ASSIGN; }
-"+=" { RT; return TOKEN_ADD_ASSIGN; }
-"-=" { RT; return TOKEN_SUB_ASSIGN; }
-"<<=" { RT; return TOKEN_LEFT_ASSIGN; }
-">>=" { RT; return TOKEN_RIGHT_ASSIGN; }
-"&=" { RT; return TOKEN_AND_ASSIGN; }
-"^=" { RT; return TOKEN_XOR_ASSIGN; }
-"|=" { RT; return TOKEN_OR_ASSIGN; }
-"->" { RT; return TOKEN_PTR_OP; }
-";"             { RT; return ';'; }
-("{"|"<%")      { RT; return '{'; }
-("}"|"%>")      { RT; return '}'; }
-","             { RT; return ','; }
-":"             { RT; return ':'; }
-"="             { RT; return '='; }
-"("             { RT; return '('; }
-")"             { RT; return ')'; }
-("["|"<:")      { RT; return '['; }
-("]"|":>")      { RT; return ']'; }
-"."             { RT; return '.'; }
-"&"             { RT; return '&'; }
-"!"             { RT; return '!'; }
-"~"             { RT; return '~'; }
-"-"             { RT; return '-'; }
-"+"             { RT; return '+'; }
-"*"             { RT; return '*'; }
-"/"             { RT; return '/'; }
-"%"             { RT; return '%'; }
-"<"             { RT; return '<'; }
-">"             { RT; return '>'; }
-"^"             { RT; return '^'; }
-"|"             { RT; return '|'; }
-"?"             { RT; return '?'; }
+"++" { return TOKEN_INC_OP; }
+"--" { return TOKEN_DEC_OP; }
+"<<" { return TOKEN_LEFT_OP; }
+">>" { return TOKEN_RIGHT_OP; }
+"<=" { return TOKEN_LE_OP; }
+">=" { return TOKEN_GE_OP; }
+"==" { return TOKEN_EQ_OP; }
+"!=" { return TOKEN_NE_OP; }
+"&&" { return TOKEN_AND_OP; }
+"||" { return TOKEN_OR_OP; }
+"*=" { return TOKEN_MUL_ASSIGN; }
+"/=" { return TOKEN_DIV_ASSIGN; }
+"%=" { return TOKEN_MOD_ASSIGN; }
+"+=" { return TOKEN_ADD_ASSIGN; }
+"-=" { return TOKEN_SUB_ASSIGN; }
+"<<=" { return TOKEN_LEFT_ASSIGN; }
+">>=" { return TOKEN_RIGHT_ASSIGN; }
+"&=" { return TOKEN_AND_ASSIGN; }
+"^=" { return TOKEN_XOR_ASSIGN; }
+"|=" { return TOKEN_OR_ASSIGN; }
+"->" { return TOKEN_PTR_OP; }
+";"             { return ';'; }
+("{"|"<%")      { return '{'; }
+("}"|"%>")      { return '}'; }
+","             { return ','; }
+":"             { return ':'; }
+"="             { return '='; }
+"("             { return '('; }
+")"             { return ')'; }
+("["|"<:")      { return '['; }
+("]"|":>")      { return ']'; }
+"."             { return '.'; }
+"&"             { return '&'; }
+"!"             { return '!'; }
+"~"             { return '~'; }
+"-"             { return '-'; }
+"+"             { return '+'; }
+"*"             { return '*'; }
+"/"             { return '/'; }
+"%"             { return '%'; }
+"<"             { return '<'; }
+">"             { return '>'; }
+"^"             { return '^'; }
+"|"             { return '|'; }
+"?"             { return '?'; }
 
 {WHITESPACE} { }
 
@@ -662,7 +574,7 @@ static int
 lParseInteger(bool dotdotdot) {
     int ls = 0, us = 0;
 
-    char *endPtr = NULL;
+    char *endPtr = nullptr;
     if (yytext[0] == '0' && yytext[1] == 'b')
         yylval.intVal = lParseBinary(yytext+2, yylloc, &endPtr);
     else {
@@ -838,7 +750,7 @@ static void lPragmaUnroll(YYSTYPE *yylval, SourcePos *pos, std::string fromUserR
         ++pos->last_column;
     }
 
-    char *endPtr = NULL;
+    char *endPtr = nullptr;
 #if defined(ISPC_HOST_IS_WINDOWS) && !defined(__MINGW32__)
     count = _strtoui64(currChar, &endPtr, 0);
 #else
@@ -1023,8 +935,7 @@ static void lHandleCppHash(SourcePos *pos) {
         filename.push_back(*src);
         ++src;
     }
-    pos->name = strdup(filename.c_str());
-    RegisterDependency(filename);
+    pos->name = RegisterDependency(filename);
 }
 
 
@@ -1086,7 +997,7 @@ lStringConst(YYSTYPE *yylval, SourcePos *pos)
     char *p;
     std::string str;
     p = strchr(yytext, '"') + 1;
-    if (p == NULL)
+    if (p == nullptr)
        return;
 
     while (*p != '\"') {
@@ -1124,7 +1035,7 @@ ipow2(int exponent) {
 */
 static double
 lParseHexFloat(const char *ptr) {
-    Assert(ptr != NULL);
+    Assert(ptr != nullptr);
 
     Assert(ptr[0] == '0' && (ptr[1] == 'x' || ptr[1] == 'X'));
     ptr += 2;
@@ -1168,7 +1079,7 @@ lParseHexFloat(const char *ptr) {
     ++ptr; // skip the 'p'/'P'
 
     // interestingly enough, the exponent is provided base 10..
-    char* endptr = NULL;
+    char* endptr = nullptr;
     int exponent = (int)strtol(ptr, &endptr, 10);
     Assert(ptr != endptr);
 
@@ -1176,4 +1087,15 @@ lParseHexFloat(const char *ptr) {
     // be represented exactly as doubles?  I would hope so but am not sure,
     // so let's be sure.
     return mantissa * ipow2(exponent);
+}
+
+/** Parse an operator.
+*/
+static int
+lParseOperator(const char *ptr) {
+    yylval.stringVal = new std::string(ptr);
+    if (m->symbolTable->LookupFunctionTemplate(yytext))
+        return TOKEN_TEMPLATE_NAME;
+    else
+        return TOKEN_IDENTIFIER;
 }

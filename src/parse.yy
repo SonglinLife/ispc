@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 %locations
@@ -62,7 +35,7 @@
             YYRHSLOC (Rhs, 0).last_line;                               \
           (Current).first_column = (Current).last_column =             \
             YYRHSLOC (Rhs, 0).last_column;                             \
-          (Current).name = NULL;                        /* new */ \
+          (Current).name = nullptr;                        /* new */ \
         }                                                              \
     while (0)
 
@@ -74,11 +47,13 @@ struct PragmaAttributes {
         aType = AttributeType::none;
         unrollType =  Globals::pragmaUnrollType::none;
         count = -1;
-    }    
+    }
     AttributeType aType;
     Globals::pragmaUnrollType unrollType;
     int count;
 };
+
+typedef std::pair<Declarator *, TemplateArgs *> SimpleTemplateIDType;
 
 }
 
@@ -87,6 +62,7 @@ struct PragmaAttributes {
 
 #include "decl.h"
 #include "expr.h"
+#include "func.h"
 #include "ispc.h"
 #include "module.h"
 #include "stmt.h"
@@ -95,6 +71,7 @@ struct PragmaAttributes {
 #include "util.h"
 
 #include <stdio.h>
+#include <variant>
 #include <llvm/IR/Constants.h>
 
 using namespace ispc;
@@ -110,18 +87,26 @@ extern char *yytext;
 
 void yyerror(const char *s);
 
+void lCleanUpString(std::string *str);
+void lFreeSimpleTemplateID(void *p);
 static int lYYTNameErr(char *yyres, const char *yystr);
 
 static void lSuggestBuiltinAlternates();
 static void lSuggestParamListAlternates();
 
 static void lAddDeclaration(DeclSpecs *ds, Declarator *decl);
+static void lAddTemplateDeclaration(TemplateParms *templateParmList, DeclSpecs *ds, Declarator *decl);
+static void lAddTemplateSpecialization(const TemplateArgs &templArgs, DeclSpecs *ds, Declarator *decl);
 static void lAddFunctionParams(Declarator *decl);
 static void lAddMaskToSymbolTable(SourcePos pos);
 static void lAddThreadIndexCountToSymbolTable(SourcePos pos);
 static std::string lGetAlternates(std::vector<std::string> &alternates);
 static const char *lGetStorageClassString(StorageClass sc);
-static bool lGetConstantInt(Expr *expr, int *value, SourcePos pos, const char *usage);
+static bool lGetConstantIntOrSymbol(Expr *expr, std::variant<std::monostate, int, Symbol*> *value, SourcePos pos, const char *usage);
+
+enum class TemplateType { Template, Instantiation, Specialization };
+static void lCheckTemplateDeclSpecs(DeclSpecs *ds, SourcePos pos, TemplateType type, const char* name);
+
 static EnumType *lCreateEnumType(const char *name, std::vector<Symbol *> *enums,
                                  SourcePos pos);
 static void lFinalizeEnumeratorSymbols(std::vector<Symbol *> &enums,
@@ -136,17 +121,17 @@ static const char *lBuiltinTokens[] = {
     "int", "int8", "int16", "int32", "int64", "invoke_sycl", "launch", "new", "NULL",
     "print", "return", "signed", "sizeof", "static", "struct", "switch",
     "sync", "task", "true", "typedef", "uniform", "unmasked", "unsigned",
-    "varying", "void", "while", NULL
+    "varying", "void", "while", "__attribute__", NULL
 };
 
 static const char *lParamListTokens[] = {
     "bool", "const", "double", "enum", "false", "float16", "float", "int",
     "int8", "int16", "int32", "int64", "signed", "struct", "true",
-    "uniform", "unsigned", "varying", "void", NULL
+    "uniform", "unsigned", "varying", "void", "__attribute__", NULL
 };
 
 struct ForeachDimension {
-    ForeachDimension(Symbol *s = NULL, Expr *b = NULL, Expr *e = NULL) {
+    ForeachDimension(Symbol *s = nullptr, Expr *b = nullptr, Expr *e = nullptr) {
         sym = s;
         beginExpr = b;
         endExpr = e;
@@ -173,6 +158,9 @@ struct ForeachDimension {
     StorageClass storageClass;
     Stmt *stmt;
     DeclSpecs *declSpecs;
+    AttributeList *attributeList;
+    Attribute *attr;
+    AttrArgument *attrArg;
     Declaration *declaration;
     std::vector<Declarator *> *declarators;
     std::vector<Declaration *> *declarationList;
@@ -188,6 +176,13 @@ struct ForeachDimension {
     std::pair<std::string, SourcePos> *declspecPair;
     std::vector<std::pair<std::string, SourcePos> > *declspecList;
     PragmaAttributes *pragmaAttributes;
+    const TemplateArg *templateArg;
+    const TemplateArgs *templateArgs;
+    const TemplateParam *templateParm;
+    TemplateParms *templateParmList;
+    const TemplateTypeParmType *templateTypeParm;
+    TemplateSymbol *functionTemplateSym;
+    SimpleTemplateIDType *simpleTemplateID;
 }
 
 
@@ -197,18 +192,23 @@ struct ForeachDimension {
 %token TOKEN_INT64_CONSTANT TOKEN_UINT64_CONSTANT
 %token TOKEN_INT32DOTDOTDOT_CONSTANT TOKEN_UINT32DOTDOTDOT_CONSTANT
 %token TOKEN_INT64DOTDOTDOT_CONSTANT TOKEN_UINT64DOTDOTDOT_CONSTANT
-%token TOKEN_FLOAT16_CONSTANT TOKEN_FLOAT_CONSTANT TOKEN_DOUBLE_CONSTANT TOKEN_STRING_C_LITERAL TOKEN_STRING_SYCL_LITERAL
-%token TOKEN_IDENTIFIER TOKEN_STRING_LITERAL TOKEN_TYPE_NAME TOKEN_PRAGMA TOKEN_NULL
+%token <stringVal> TOKEN_FLOAT16_CONSTANT
+%token TOKEN_FLOAT_CONSTANT TOKEN_DOUBLE_CONSTANT TOKEN_STRING_C_LITERAL TOKEN_STRING_SYCL_LITERAL
+%token <stringVal> TOKEN_IDENTIFIER TOKEN_STRING_LITERAL TOKEN_TYPE_NAME
+%token TOKEN_PRAGMA TOKEN_NULL
+%token <stringVal> TOKEN_TEMPLATE_NAME
+%token TOKEN_TEMPLATE TOKEN_TYPENAME
 %token TOKEN_PTR_OP TOKEN_INC_OP TOKEN_DEC_OP TOKEN_LEFT_OP TOKEN_RIGHT_OP
 %token TOKEN_LE_OP TOKEN_GE_OP TOKEN_EQ_OP TOKEN_NE_OP
 %token TOKEN_AND_OP TOKEN_OR_OP TOKEN_MUL_ASSIGN TOKEN_DIV_ASSIGN TOKEN_MOD_ASSIGN
 %token TOKEN_ADD_ASSIGN TOKEN_SUB_ASSIGN TOKEN_LEFT_ASSIGN TOKEN_RIGHT_ASSIGN
 %token TOKEN_AND_ASSIGN TOKEN_OR_ASSIGN TOKEN_XOR_ASSIGN
-%token TOKEN_SIZEOF TOKEN_NEW TOKEN_DELETE TOKEN_IN TOKEN_INTRINSIC_CALL TOKEN_ALLOCA
+%token TOKEN_SIZEOF TOKEN_NEW TOKEN_DELETE TOKEN_IN TOKEN_ALLOCA
+%token <stringVal> TOKEN_INTRINSIC_CALL
 
 %token TOKEN_EXTERN TOKEN_EXPORT TOKEN_STATIC TOKEN_INLINE TOKEN_NOINLINE TOKEN_VECTORCALL TOKEN_REGCALL TOKEN_TASK TOKEN_DECLSPEC
 %token TOKEN_UNIFORM TOKEN_VARYING TOKEN_TYPEDEF TOKEN_SOA TOKEN_UNMASKED
-%token TOKEN_CHAR TOKEN_INT TOKEN_SIGNED TOKEN_UNSIGNED TOKEN_FLOAT16 TOKEN_FLOAT TOKEN_DOUBLE
+%token TOKEN_INT TOKEN_SIGNED TOKEN_UNSIGNED TOKEN_FLOAT16 TOKEN_FLOAT TOKEN_DOUBLE
 %token TOKEN_INT8 TOKEN_INT16 TOKEN_INT64 TOKEN_CONST TOKEN_VOID TOKEN_BOOL
 %token TOKEN_UINT8 TOKEN_UINT16 TOKEN_UINT TOKEN_UINT64
 %token TOKEN_ENUM TOKEN_STRUCT TOKEN_TRUE TOKEN_FALSE
@@ -219,6 +219,7 @@ struct ForeachDimension {
 %token TOKEN_FOR TOKEN_GOTO TOKEN_CONTINUE TOKEN_BREAK TOKEN_RETURN
 %token TOKEN_CIF TOKEN_CDO TOKEN_CFOR TOKEN_CWHILE
 %token TOKEN_SYNC TOKEN_PRINT TOKEN_ASSERT TOKEN_INVOKE_SYCL
+%token TOKEN_ATTRIBUTE
 
 %type <expr> primary_expression postfix_expression integer_dotdotdot
 %type <expr> unary_expression cast_expression funcall_expression launch_expression intrincall_expression
@@ -248,7 +249,7 @@ struct ForeachDimension {
 %type <structDeclarationList> struct_declaration_list
 
 %type <symbolList> enumerator_list
-%type <symbol> enumerator foreach_identifier foreach_active_identifier
+%type <symbol> enumerator foreach_identifier foreach_active_identifier template_int_parameter template_enum_parameter
 %type <enumType> enum_specifier
 
 %type <type> specifier_qualifier_list struct_or_union_specifier
@@ -256,11 +257,15 @@ struct ForeachDimension {
 %type <type> type_specifier type_name rate_qualified_type_specifier
 %type <type> short_vec_specifier
 %type <typeList> type_specifier_list
-%type <atomicType> atomic_var_type_specifier
+%type <atomicType> atomic_var_type_specifier int_constant_type template_int_constant_type
 
 %type <typeQualifier> type_qualifier type_qualifier_list
 %type <storageClass> storage_class_specifier
 %type <declSpecs> declaration_specifiers
+
+%type <attributeList> attribute_list attribute_specifier
+%type <attr> attribute
+%type <attrArg> attribute_argument
 
 %type <stringVal> string_constant intrinsic_name
 %type <constCharPtr> struct_or_union_name enum_identifier goto_identifier
@@ -275,38 +280,60 @@ struct ForeachDimension {
 %type <declspecPair> declspec_item
 %type <declspecList> declspec_specifier declspec_list
 
+%type <constCharPtr> template_identifier
+%type <templateArg> template_argument
+%type <templateArgs> template_argument_list
+%type <simpleTemplateID> simple_template_id template_function_specialization_declaration
+%type <templateTypeParm> template_type_parameter
+%type <templateParm> template_parameter
+%type <templateParmList> template_parameter_list template_head
+%type <functionTemplateSym> template_declaration
+
+%destructor { lCleanUpString($$); } <stringVal>
+// TODO! destructos for all semantic types that return pointer to heap-allocated memory
+// e.g., tests/lit-tests/2599.ispc
+
 %start translation_unit
 %%
 
 string_constant
-    : TOKEN_STRING_LITERAL { $$ = new std::string(*yylval.stringVal); }
+    : TOKEN_STRING_LITERAL
+    {
+        $$ = new std::string(*$1);
+        lCleanUpString($1);
+    }
     | string_constant TOKEN_STRING_LITERAL
     {
-        std::string s = *((std::string *)$1);
-        s += *yylval.stringVal;
-        $$ = new std::string(s);
+        std::string *p_str_cst = new std::string();
+        p_str_cst->append(*$1);
+        p_str_cst->append(*$2);
+        $$ = p_str_cst;
+        // Allocated in lStringConst
+        lCleanUpString($1);
+        lCleanUpString($2);
     }
     ;
 
 primary_expression
     : TOKEN_IDENTIFIER {
-        const char *name = yylval.stringVal->c_str();
+        const char *name = $1->c_str();
         Symbol *s = m->symbolTable->LookupVariable(name);
-        $$ = NULL;
+        $$ = nullptr;
         if (s)
             $$ = new SymbolExpr(s, @1);
         else {
             std::vector<Symbol *> funs;
             m->symbolTable->LookupFunction(name, &funs);
             if (funs.size() > 0)
-                $$ = new FunctionSymbolExpr(name, funs, @1);
+                $$ = new FunctionSymbolExpr(name, funs, {}, TemplateArgs(), @1);
         }
-        if ($$ == NULL) {
+        if ($$ == nullptr) {
             std::vector<std::string> alternates =
                 m->symbolTable->ClosestVariableOrFunctionMatch(name);
             std::string alts = lGetAlternates(alternates);
             Error(@1, "Undeclared symbol \"%s\".%s", name, alts.c_str());
         }
+        lCleanUpString($1);
     }
     | TOKEN_INT8_CONSTANT {
         $$ = new ConstExpr(AtomicType::UniformInt8->GetAsConstType(),
@@ -341,7 +368,8 @@ primary_expression
                            (uint64_t)yylval.intVal, @1);
     }
     | TOKEN_FLOAT16_CONSTANT {
-         std::string sval = *(yylval.stringVal);
+         std::string sval = *$1;
+         lCleanUpString($1);
          llvm::Type *hType = llvm::Type::getHalfTy(*g->ctx);
          const llvm::fltSemantics &FS = hType->getFltSemantics();
          llvm::APFloat f16(FS, sval);
@@ -370,7 +398,7 @@ primary_expression
 /*    | TOKEN_STRING_LITERAL
        { UNIMPLEMENTED }*/
     | '(' expression ')' { $$ = $2; }
-    | '(' error ')' { $$ = NULL; }
+    | '(' error ')' { $$ = nullptr; }
     ;
 
 launch_expression
@@ -388,60 +416,60 @@ launch_expression
        }
 
     | TOKEN_LAUNCH '[' assignment_expression ']' postfix_expression '(' argument_expression_list ')'
-      { 
+      {
           ConstExpr *oneExpr = new ConstExpr(AtomicType::UniformInt32, (int32_t)1, @5);
           Expr *launchCount[3] = {$3, oneExpr, oneExpr};
           $$ = new FunctionCallExpr($5, $7, Union(@5,@8), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ']' postfix_expression '(' ')'
-      { 
+      {
           ConstExpr *oneExpr = new ConstExpr(AtomicType::UniformInt32, (int32_t)1, @5);
           Expr *launchCount[3] = {$3, oneExpr, oneExpr};
           $$ = new FunctionCallExpr($5, new ExprList(Union(@5,@6)), Union(@5,@7), true, launchCount);
       }
 
     | TOKEN_LAUNCH '[' assignment_expression ',' assignment_expression ']' postfix_expression '(' argument_expression_list ')'
-      { 
+      {
           ConstExpr *oneExpr = new ConstExpr(AtomicType::UniformInt32, (int32_t)1, @7);
           Expr *launchCount[3] = {$3, $5, oneExpr};
           $$ = new FunctionCallExpr($7, $9, Union(@7,@10), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ',' assignment_expression ']' postfix_expression '(' ')'
-      { 
+      {
           ConstExpr *oneExpr = new ConstExpr(AtomicType::UniformInt32, (int32_t)1, @7);
           Expr *launchCount[3] = {$3, $5, oneExpr};
           $$ = new FunctionCallExpr($7, new ExprList(Union(@7,@8)), Union(@7,@9), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ']' '[' assignment_expression ']' postfix_expression '(' argument_expression_list ')'
-      { 
+      {
           ConstExpr *oneExpr = new ConstExpr(AtomicType::UniformInt32, (int32_t)1, @8);
           Expr *launchCount[3] = {$6, $3, oneExpr};
           $$ = new FunctionCallExpr($8, $10, Union(@8,@11), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ']' '[' assignment_expression ']' postfix_expression '(' ')'
-      { 
+      {
           ConstExpr *oneExpr = new ConstExpr(AtomicType::UniformInt32, (int32_t)1, @8);
           Expr *launchCount[3] = {$6, $3, oneExpr};
           $$ = new FunctionCallExpr($8, new ExprList(Union(@8,@9)), Union(@8,@10), true, launchCount);
       }
 
     | TOKEN_LAUNCH '[' assignment_expression ',' assignment_expression ',' assignment_expression ']' postfix_expression '(' argument_expression_list ')'
-      { 
+      {
           Expr *launchCount[3] = {$3, $5, $7};
           $$ = new FunctionCallExpr($9, $11, Union(@9,@12), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ',' assignment_expression ',' assignment_expression ']' postfix_expression '(' ')'
-      { 
+      {
           Expr *launchCount[3] = {$3, $5, $7};
           $$ = new FunctionCallExpr($9, new ExprList(Union(@9,@10)), Union(@9,@11), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ']' '[' assignment_expression ']' '[' assignment_expression ']' postfix_expression '(' argument_expression_list ')'
-      { 
+      {
           Expr *launchCount[3] = {$9, $6, $3};
           $$ = new FunctionCallExpr($11, $13, Union(@11,@14), true, launchCount);
       }
     | TOKEN_LAUNCH '[' assignment_expression ']' '[' assignment_expression ']' '[' assignment_expression ']' postfix_expression '(' ')'
-      { 
+      {
           Expr *launchCount[3] = {$9, $6, $3};
           $$ = new FunctionCallExpr($11, new ExprList(Union(@11,@12)), Union(@11,@13), true, launchCount);
       }
@@ -451,39 +479,39 @@ launch_expression
        {
           Error(Union(@2, @7), "\"launch\" expressions no longer take '<' '>' "
                 "around function call expression.");
-          $$ = NULL;
+          $$ = nullptr;
        }
     | TOKEN_LAUNCH '<' postfix_expression '(' ')' '>'
        {
           Error(Union(@2, @6), "\"launch\" expressions no longer take '<' '>' "
                 "around function call expression.");
-          $$ = NULL;
+          $$ = nullptr;
        }
     | TOKEN_LAUNCH '[' assignment_expression ']' '<' postfix_expression '(' argument_expression_list ')' '>'
        {
           Error(Union(@5, @10), "\"launch\" expressions no longer take '<' '>' "
                 "around function call expression.");
-          $$ = NULL;
+          $$ = nullptr;
        }
     | TOKEN_LAUNCH '[' assignment_expression ']' '<' postfix_expression '(' ')' '>'
        {
           Error(Union(@5, @9), "\"launch\" expressions no longer take '<' '>' "
                 "around function call expression.");
-          $$ = NULL;
+          $$ = nullptr;
        }
     ;
 
 invoke_sycl_expression
     : TOKEN_INVOKE_SYCL '(' postfix_expression ')'
       {
-          $$ = new FunctionCallExpr($3, new ExprList(@4), Union(@1,@4), false, NULL, true);
+          $$ = new FunctionCallExpr($3, new ExprList(@4), Union(@1,@4), false, nullptr, true);
       }
     | TOKEN_INVOKE_SYCL '(' postfix_expression ',' argument_expression_list ')'
       {
-          $$ = new FunctionCallExpr($3, $5, Union(@1,@6), false, NULL, true);
+          $$ = new FunctionCallExpr($3, $5, Union(@1,@6), false, nullptr, true);
       }
     | TOKEN_INVOKE_SYCL '(' error ')'
-      { $$ = NULL; }
+      { $$ = nullptr; }
     ;
 
 postfix_expression
@@ -491,12 +519,42 @@ postfix_expression
     | postfix_expression '[' expression ']'
       { $$ = new IndexExpr($1, $3, Union(@1,@4)); }
     | postfix_expression '[' error ']'
-      { $$ = NULL; }
+      { $$ = nullptr; }
     | launch_expression
     | postfix_expression '.' TOKEN_IDENTIFIER
-      { $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, false); }
+      {
+          $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, false);
+          lCleanUpString($3);
+      }
+    /* When we have postfix_expression inside template definition, we need to allow cases when
+       member name equals to template name or template parameter name. */
+    | postfix_expression '.' TOKEN_TYPE_NAME
+      {
+          $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, false);
+          lCleanUpString($3);
+      }
+    | postfix_expression '.' TOKEN_TEMPLATE_NAME
+      {
+          $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, false);
+          lCleanUpString($3);
+      }
     | postfix_expression TOKEN_PTR_OP TOKEN_IDENTIFIER
-      { $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, true); }
+      {
+          $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, true);
+          lCleanUpString($3);
+      }
+    /* When we have postfix_expression inside template definition, we need to allow cases when
+       member name equals to template name or template parameter name. */
+    | postfix_expression TOKEN_PTR_OP TOKEN_TYPE_NAME
+      {
+          $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, true);
+          lCleanUpString($3);
+      }
+    | postfix_expression TOKEN_PTR_OP TOKEN_TEMPLATE_NAME
+      {
+          $$ = MemberExpr::create($1, yytext, Union(@1,@3), @3, true);
+          lCleanUpString($3);
+      }
     | postfix_expression TOKEN_INC_OP
       { $$ = new UnaryExpr(UnaryExpr::PostInc, $1, Union(@1,@2)); }
     | postfix_expression TOKEN_DEC_OP
@@ -506,23 +564,36 @@ postfix_expression
 intrinsic_name
     : TOKEN_INTRINSIC_CALL
       {
-          $$ = yylval.stringVal;
+          $$ = $1;
       }
     ;
 
 intrincall_expression
-    : intrinsic_name '(' argument_expression_list ')'
+    : intrinsic_name '(' ')'
+      {
+          std::string *name = $1;
+          name->erase(0, 1);
+          Symbol* sym = m->AddLLVMIntrinsicDecl(*name, nullptr, Union(@1,@3));
+          const char *fname = name->c_str();
+          const std::vector<Symbol *> funcs{sym};
+          FunctionSymbolExpr *fSym = nullptr;
+          if (sym != nullptr)
+              fSym = new FunctionSymbolExpr(fname, funcs, {}, TemplateArgs(), @1);
+          $$ = new FunctionCallExpr(fSym, new ExprList(Union(@1,@2)), Union(@1,@3));
+          delete name;
+      }
+    | intrinsic_name '(' argument_expression_list ')'
       {
           std::string *name = $1;
           name->erase(0, 1);
           Symbol* sym = m->AddLLVMIntrinsicDecl(*name, $3, Union(@1,@4));
           const char *fname = name->c_str();
           const std::vector<Symbol *> funcs{sym};
-          FunctionSymbolExpr *fSym = NULL;
-          if (sym != NULL)
-              fSym = new FunctionSymbolExpr(fname, funcs, @1);
+          FunctionSymbolExpr *fSym = nullptr;
+          if (sym != nullptr)
+              fSym = new FunctionSymbolExpr(fname, funcs, {}, TemplateArgs(), @1);
           $$ = new FunctionCallExpr(fSym, $3, Union(@1,@4));
-
+          delete name;
       }
     ;
 
@@ -533,7 +604,58 @@ funcall_expression
     | postfix_expression '(' argument_expression_list ')'
       { $$ = new FunctionCallExpr($1, $3, Union(@1,@4)); }
     | postfix_expression '(' error ')'
-      { $$ = NULL; }
+      { $$ = nullptr; }
+    | simple_template_id '(' ')'
+      {
+          // Create FunctionSymbolExpr with a candidate functions list
+          Expr *functionSymbolExpr = nullptr;
+          const std::string name = $1->first->name;
+          std::vector<Symbol *> funcs;
+          m->symbolTable->LookupFunction(name.c_str(), &funcs);
+          std::vector<TemplateSymbol *> funcTempls;
+          m->symbolTable->LookupFunctionTemplate(name, &funcTempls);
+          if (funcs.size() > 0 || funcTempls.size() > 0) {
+              TemplateArgs *templArgs = $1->second;
+              Assert(templArgs);
+              functionSymbolExpr = new FunctionSymbolExpr(name.c_str(), funcs, funcTempls, *templArgs, @1);
+              $$ = new FunctionCallExpr(functionSymbolExpr, new ExprList(Union(@1,@2)), Union(@1,@3));
+          } else {
+              Error(@1, "No matching functions were declared.");
+              $$ = nullptr;
+          }
+
+          // deallocate SimpleTemplateIDType returned by simple_template_id
+          lFreeSimpleTemplateID($1);
+      }
+    | simple_template_id '(' argument_expression_list ')'
+      {
+          // Create FunctionSymbolExpr with a candidate functions list
+          Expr *functionSymbolExpr = nullptr;
+          const std::string name = $1->first->name;
+          std::vector<Symbol *> funcs;
+          m->symbolTable->LookupFunction(name.c_str(), &funcs);
+          std::vector<TemplateSymbol *> funcTempls;
+          m->symbolTable->LookupFunctionTemplate(name, &funcTempls);
+          if (funcs.size() > 0 || funcTempls.size() > 0) {
+              TemplateArgs *templArgs = $1->second;
+              Assert(templArgs);
+              functionSymbolExpr = new FunctionSymbolExpr(name.c_str(), funcs, funcTempls, *templArgs, @1);
+              $$ = new FunctionCallExpr(functionSymbolExpr, $3, Union(@1,@4));
+          } else {
+              Error(@1, "No matching functions were declared.");
+              $$ = nullptr;
+          }
+
+          // deallocate SimpleTemplateIDType returned by simple_template_id
+          lFreeSimpleTemplateID($1);
+      }
+    | simple_template_id '(' error ')'
+      {
+          $$ = nullptr;
+
+          // deallocate SimpleTemplateIDType returned by simple_template_id
+          lFreeSimpleTemplateID($1);
+      }
     ;
 
 argument_expression_list
@@ -541,7 +663,7 @@ argument_expression_list
     | argument_expression_list ',' assignment_expression
       {
           ExprList *argList = llvm::dyn_cast<ExprList>($1);
-          if (argList == NULL) {
+          if (argList == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               argList = new ExprList(@3);
           }
@@ -681,42 +803,42 @@ rate_qualified_type_specifier
     : type_specifier { $$ = $1; }
     | TOKEN_UNIFORM type_specifier
     {
-        if ($2 == NULL)
-            $$ = NULL;
+        if ($2 == nullptr)
+            $$ = nullptr;
         else if ($2->IsVoidType()) {
             Error(@1, "\"uniform\" qualifier is illegal with \"void\" type.");
-            $$ = NULL;
+            $$ = nullptr;
         }
         else
             $$ = $2->GetAsUniformType();
     }
     | TOKEN_VARYING type_specifier
     {
-        if ($2 == NULL)
-            $$ = NULL;
+        if ($2 == nullptr)
+            $$ = nullptr;
         else if ($2->IsVoidType()) {
             Error(@1, "\"varying\" qualifier is illegal with \"void\" type.");
-            $$ = NULL;
+            $$ = nullptr;
         }
         else
             $$ = $2->GetAsVaryingType();
     }
     | soa_width_specifier type_specifier
     {
-        if ($2 == NULL)
-            $$ = NULL;
+        if ($2 == nullptr)
+            $$ = nullptr;
         else {
             int soaWidth = (int)$1;
             const StructType *st = CastType<StructType>($2);
-            if (st == NULL) {
+            if (st == nullptr) {
                 Error(@1, "\"soa\" qualifier is illegal with non-struct type \"%s\".",
                       $2->GetString().c_str());
-                $$ = NULL;
+                $$ = nullptr;
             }
             else if (soaWidth <= 0 || (soaWidth & (soaWidth - 1)) != 0) {
                 Error(@1, "soa<%d> width illegal. Value must be positive power "
                       "of two.", soaWidth);
-                $$ = NULL;
+                $$ = nullptr;
             }
             else
                 $$ = st->GetAsSOAType(soaWidth);
@@ -728,15 +850,15 @@ new_expression
     : conditional_expression
     | rate_qualified_new rate_qualified_type_specifier
     {
-        $$ = new NewExpr((int32_t)$1, $2, NULL, NULL, @1, Union(@1, @2));
+        $$ = new NewExpr((int32_t)$1, $2, nullptr, nullptr, @1, Union(@1, @2));
     }
     | rate_qualified_new rate_qualified_type_specifier '(' initializer_list ')'
     {
-        $$ = new NewExpr((int32_t)$1, $2, $4, NULL, @1, Union(@1, @2));
+        $$ = new NewExpr((int32_t)$1, $2, $4, nullptr, @1, Union(@1, @2));
     }
     | rate_qualified_new rate_qualified_type_specifier '[' expression ']'
     {
-        $$ = new NewExpr((int32_t)$1, $2, NULL, $4, @1, Union(@1, @4));
+        $$ = new NewExpr((int32_t)$1, $2, nullptr, $4, @1, Union(@1, @4));
     }
     ;
 
@@ -779,20 +901,20 @@ constant_expression
 declaration_statement
     : declaration
     {
-        if ($1 == NULL) {
+        if ($1 == nullptr) {
             AssertPos(@1, m->errorCount > 0);
-            $$ = NULL;
+            $$ = nullptr;
         }
         else if ($1->declSpecs->storageClass == SC_TYPEDEF) {
             for (unsigned int i = 0; i < $1->declarators.size(); ++i) {
-                if ($1->declarators[i] == NULL)
+                if ($1->declarators[i] == nullptr)
                     AssertPos(@1, m->errorCount > 0);
                 else
                     m->AddTypeDef($1->declarators[i]->name,
                                   $1->declarators[i]->type,
                                   $1->declarators[i]->pos);
             }
-            $$ = NULL;
+            $$ = nullptr;
         }
         else {
             $1->DeclareFunctions();
@@ -810,6 +932,9 @@ declaration
     | declaration_specifiers init_declarator_list ';'
       {
           $$ = new Declaration($1, $2);
+          // init_declarator_list returns vector of declarators, its copy is
+          // saved in Declaration constructor, so it is not needed anymore.
+          delete $2;
       }
     ;
 
@@ -822,9 +947,10 @@ declspec_item
     : TOKEN_IDENTIFIER
     {
         std::pair<std::string, SourcePos> *p = new std::pair<std::string, SourcePos>;
-        p->first = *(yylval.stringVal);
+        p->first = *$1;
         p->second = @1;
         $$ = p;
+        lCleanUpString($1);
     }
     ;
 
@@ -833,11 +959,16 @@ declspec_list
     {
         $$ = new std::vector<std::pair<std::string, SourcePos> >;
         $$->push_back(*$1);
+        // declspec_item returns pair that was copied so it is not needed anymore.
+        delete $1;
     }
     | declspec_list ',' declspec_item
     {
-        if ($1 != NULL)
+        if ($1 != nullptr) {
             $1->push_back(*$3);
+            // declspec_item returns pair that was copied so it is not needed anymore.
+            delete $3;
+        }
         $$ = $1;
     }
     ;
@@ -845,6 +976,7 @@ declspec_list
 declspec_specifier
     : TOKEN_DECLSPEC '(' declspec_list ')'
     {
+        // declspec_list returns heap allocated vector that passed up here.
         $$ = $3;
     }
     ;
@@ -852,12 +984,12 @@ declspec_specifier
 declaration_specifiers
     : storage_class_specifier
       {
-          $$ = new DeclSpecs(NULL, $1);
+          $$ = new DeclSpecs(nullptr, $1);
       }
     | storage_class_specifier declaration_specifiers
       {
           DeclSpecs *ds = (DeclSpecs *)$2;
-          if (ds != NULL) {
+          if (ds != nullptr) {
               if (ds->storageClass != SC_NONE)
                   Error(@1, "Multiple storage class specifiers in a declaration are illegal. "
                         "(Have provided both \"%s\" and \"%s\".)",
@@ -871,16 +1003,22 @@ declaration_specifiers
     | declspec_specifier
       {
           $$ = new DeclSpecs;
-          if ($1 != NULL)
+          if ($1 != nullptr) {
               $$->declSpecList = *$1;
+              // declspec_specifier returns a vector that was copied and it is not needed anymore.
+              delete $1;
+          }
       }
     | declspec_specifier declaration_specifiers
       {
           DeclSpecs *ds = (DeclSpecs *)$2;
           std::vector<std::pair<std::string, SourcePos> > *declSpecList = $1;
-          if (ds != NULL && declSpecList != NULL) {
+          if (ds != nullptr && declSpecList != nullptr) {
               for (int i = 0; i < (int)declSpecList->size(); ++i)
                   ds->declSpecList.push_back((*declSpecList)[i]);
+
+              // declspec_specifier returns a vector that was copied and it is not needed anymore.
+              delete declSpecList;
           }
           $$ = ds;
       }
@@ -893,7 +1031,7 @@ declaration_specifiers
     | soa_width_specifier declaration_specifiers
       {
           DeclSpecs *ds = (DeclSpecs *)$2;
-          if (ds != NULL) {
+          if (ds != nullptr) {
               if (ds->soaWidth != 0)
                   Error(@1, "soa<> qualifier supplied multiple times in declaration.");
               else
@@ -911,18 +1049,34 @@ declaration_specifiers
           ds->vectorSize = (int32_t)$3;
           $$ = ds;
     }
+    | type_specifier '<' TOKEN_IDENTIFIER '>'
+    {
+          DeclSpecs *ds = new DeclSpecs($1);
+          const char *name = $3->c_str();
+          Symbol *s = m->symbolTable->LookupVariable(name);
+          if (s) {
+            ds->vectorSize = s;
+          } else {
+            Error(@3, "Unknown identifier \"%s\" is used to specify the size of a vector type.", name);
+          }
+          $$ = ds;
+          lCleanUpString($3);
+    }
     | type_specifier declaration_specifiers
       {
           DeclSpecs *ds = (DeclSpecs *)$2;
-          if (ds != NULL) {
-              if (ds->baseType != NULL) {
+          if (ds != nullptr) {
+              if (ds->baseType != nullptr) {
                   if( ds->baseType->IsUnsignedType()) {
                       Error(@1, "Redefining uint8/uint16/uint32/uint64 type "
                       "which is part of ISPC language since version 1.13. "
                       "Remove this typedef or use ISPC_UINT_IS_DEFINED to "
                       "detect that these types are defined.");
-                  }
-                  else
+                  } else if (CastType<StructType>(ds->baseType)) {
+                      // Skip the error if the base type is a struct type to
+                      // support typedef struct foo { } foo;
+                      ;
+                  } else
                       Error(@1, "Multiple types provided for declaration.");
               }
               ds->baseType = $1;
@@ -931,14 +1085,93 @@ declaration_specifiers
       }
     | type_qualifier
       {
-          $$ = new DeclSpecs(NULL, SC_NONE, $1);
+          $$ = new DeclSpecs(nullptr, SC_NONE, $1);
       }
     | type_qualifier declaration_specifiers
       {
           DeclSpecs *ds = (DeclSpecs *)$2;
-          if (ds != NULL)
+          if (ds != nullptr)
               ds->typeQualifiers |= $1;
           $$ = ds;
+      }
+    | attribute_specifier
+      {
+          AttributeList *al = $1;
+          DeclSpecs *ds = new DeclSpecs();
+          if (al) {
+              ds->AddAttrList(*al);
+              delete al;
+          }
+          $$ = ds;
+      }
+    | attribute_specifier declaration_specifiers
+      {
+          DeclSpecs *ds = (DeclSpecs *)$2;
+          AttributeList *al = $1;
+          if (ds && al) {
+              ds->AddAttrList(*al);
+              delete al;
+          }
+          $$ = ds;
+      }
+    ;
+
+attribute_specifier
+    : TOKEN_ATTRIBUTE '(' '(' attribute_list ')' ')'
+      {
+          $$ = $4;
+      }
+    ;
+
+attribute_list
+    : attribute
+      {
+          Attribute *attr = $1;
+          AttributeList *al = new AttributeList;
+          al->AddAttribute(*attr);
+          $$ = al;
+          delete attr;
+      }
+    | attribute_list ',' attribute
+      {
+          Attribute *attr = $3;
+          AttributeList *al = $1;
+          al->AddAttribute(*attr);
+          $$ = al;
+          delete attr;
+      }
+    ;
+
+attribute
+    : TOKEN_IDENTIFIER
+      {
+          std::string *str = $1;;
+          $$ = new Attribute(*str);
+          // cleanup TOKEN_IDENTIFIER string
+          lCleanUpString(str);
+      }
+    | TOKEN_IDENTIFIER '(' attribute_argument ')'
+      {
+          std::string *str = $1;;
+          AttrArgument *arg = $3;
+          $$ = new Attribute(*str, *arg);
+          delete arg;
+          // cleanup TOKEN_IDENTIFIER string
+          lCleanUpString(str);
+      }
+    ;
+
+attribute_argument
+    : int_constant
+      {
+          $$ = new AttrArgument($1);
+      }
+    | string_constant
+      {
+          std::string *str = $1;;
+          $$ = new AttrArgument(*str);
+          // deallocate std::string of string_constant
+          lCleanUpString(str);
       }
     ;
 
@@ -946,18 +1179,18 @@ init_declarator_list
     : init_declarator
       {
           std::vector<Declarator *> *dl = new std::vector<Declarator *>;
-          if ($1 != NULL)
+          if ($1 != nullptr)
               dl->push_back($1);
           $$ = dl;
       }
     | init_declarator_list ',' init_declarator
       {
           std::vector<Declarator *> *dl = (std::vector<Declarator *> *)$1;
-          if (dl == NULL) {
+          if (dl == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               dl = new std::vector<Declarator *>;
           }
-          if ($3 != NULL)
+          if ($3 != nullptr)
               dl->push_back($3);
           $$ = dl;
       }
@@ -967,7 +1200,7 @@ init_declarator
     : declarator
     | declarator '=' initializer
       {
-          if ($1 != NULL)
+          if ($1 != nullptr)
               $1->initExpr = $3;
           $$ = $1;
       }
@@ -987,6 +1220,7 @@ type_specifier
     {
         const Type *t = m->symbolTable->LookupType(yytext);
         $$ = t;
+        lCleanUpString($1);
     }
     | struct_or_union_specifier { $$ = $1; }
     | enum_specifier { $$ = $1; }
@@ -995,8 +1229,8 @@ type_specifier
 type_specifier_list
     : type_specifier
     {
-        if ($1 == NULL)
-            $$ = NULL;
+        if ($1 == nullptr)
+            $$ = nullptr;
         else {
             std::vector<std::pair<const Type *, SourcePos> > *vec =
                 new std::vector<std::pair<const Type *, SourcePos> >;
@@ -1007,7 +1241,7 @@ type_specifier_list
     | type_specifier_list ',' type_specifier
     {
         $$ = $1;
-        if ($1 == NULL)
+        if ($1 == nullptr)
             Assert(m->errorCount > 0);
         else
             $$->push_back(std::make_pair($3, @3));
@@ -1031,36 +1265,52 @@ atomic_var_type_specifier
     ;
 
 short_vec_specifier
-    : atomic_var_type_specifier '<' int_constant '>'
+    : type_specifier '<' int_constant '>'
     {
-        $$ = $1 ? new VectorType($1, (int32_t)$3) : NULL;
+        $$ = $1 ? new VectorType($1, (int32_t)$3) : nullptr;
+    }
+    | type_specifier '<' TOKEN_IDENTIFIER '>'
+    {
+        Symbol* s = new Symbol(*$<stringVal>3, Union(@1, @3), Symbol::SymbolKind::TemplateNonTypeParm, AtomicType::UniformInt32->GetAsConstType());
+        lCleanUpString($3);
+        $$ = $1 ? new VectorType($1, s) : nullptr;
     }
     ;
 
 struct_or_union_name
-    : TOKEN_IDENTIFIER { $$ = strdup(yytext); }
-    | TOKEN_TYPE_NAME  { $$ = strdup(yytext); }
+    : TOKEN_IDENTIFIER
+    {
+        $$ = strdup(yytext);
+        lCleanUpString($1);
+    }
+    | TOKEN_TYPE_NAME
+    {
+        $$ = strdup(yytext);
+        lCleanUpString($1);
+    }
     ;
 
 struct_or_union_and_name
     : struct_or_union struct_or_union_name
       {
           const Type *st = m->symbolTable->LookupType($2);
-          if (st == NULL) {
+          if (st == nullptr) {
               st = new UndefinedStructType($2, Variability::Unbound, false, @2);
               m->symbolTable->AddType($2, st, @2);
               $$ = st;
           }
           else {
-              if (CastType<StructType>(st) == NULL &&
-                  CastType<UndefinedStructType>(st) == NULL) {
+              if (CastType<StructType>(st) == nullptr &&
+                  CastType<UndefinedStructType>(st) == nullptr) {
                   Error(@2, "Type \"%s\" is not a struct type! (%s)", $2,
                         st->GetString().c_str());
-                  $$ = NULL;
+                  $$ = nullptr;
               }
               else
                   $$ = st;
          }
+         // allocated by strdup in struct_or_union_name
+         free((char*)$2);
       }
     ;
 
@@ -1068,7 +1318,7 @@ struct_or_union_specifier
     : struct_or_union_and_name
     | struct_or_union_and_name '{' struct_declaration_list '}'
       {
-          if ($3 != NULL) {
+          if ($3 != nullptr) {
               llvm::SmallVector<const Type *, 8> elementTypes;
               llvm::SmallVector<std::string, 8> elementNames;
               llvm::SmallVector<SourcePos, 8> elementPositions;
@@ -1082,13 +1332,15 @@ struct_or_union_specifier
                                               Variability::Unbound, false, @1);
               m->symbolTable->AddType(name.c_str(), st, @1);
               $$ = st;
+              // struct_declaration_list returns a vector that is not needed anymore.
+              delete $3;
           }
           else
-              $$ = NULL;
+              $$ = nullptr;
       }
     | struct_or_union '{' struct_declaration_list '}'
       {
-          if ($3 != NULL) {
+          if ($3 != nullptr) {
               llvm::SmallVector<const Type *, 8> elementTypes;
               llvm::SmallVector<std::string, 8> elementNames;
               llvm::SmallVector<SourcePos, 8> elementPositions;
@@ -1096,9 +1348,11 @@ struct_or_union_specifier
                                            &elementPositions);
               $$ = new StructType("", elementTypes, elementNames, elementPositions,
                                   false, Variability::Unbound, true, @1);
+              // struct_declaration_list returns a vector that is not needed anymore.
+              delete $3;
           }
           else
-              $$ = NULL;
+              $$ = nullptr;
       }
     | struct_or_union '{' '}'
       {
@@ -1132,18 +1386,18 @@ struct_declaration_list
     : struct_declaration
       {
           std::vector<StructDeclaration *> *sdl = new std::vector<StructDeclaration *>;
-          if ($1 != NULL)
+          if ($1 != nullptr)
               sdl->push_back($1);
           $$ = sdl;
       }
     | struct_declaration_list struct_declaration
       {
           std::vector<StructDeclaration *> *sdl = (std::vector<StructDeclaration *> *)$1;
-          if (sdl == NULL) {
+          if (sdl == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               sdl = new std::vector<StructDeclaration *>;
           }
-          if ($2 != NULL)
+          if ($2 != nullptr)
               sdl->push_back($2);
           $$ = sdl;
       }
@@ -1151,7 +1405,7 @@ struct_declaration_list
 
 struct_declaration
     : specifier_qualifier_list struct_declarator_list ';'
-      { $$ = ($1 != NULL && $2 != NULL) ? new StructDeclaration($1, $2) : NULL; }
+      { $$ = ($1 != nullptr && $2 != nullptr) ? new StructDeclaration($1, $2) : nullptr; }
     ;
 
 specifier_qualifier_list
@@ -1160,11 +1414,11 @@ specifier_qualifier_list
     | short_vec_specifier
     | type_qualifier specifier_qualifier_list
     {
-        if ($2 != NULL) {
+        if ($2 != nullptr) {
             if ($1 == TYPEQUAL_UNIFORM) {
                 if ($2->IsVoidType()) {
                     Error(@1, "\"uniform\" qualifier is illegal with \"void\" type.");
-                    $$ = NULL;
+                    $$ = nullptr;
                 }
                 else
                     $$ = $2->GetAsUniformType();
@@ -1172,7 +1426,7 @@ specifier_qualifier_list
             else if ($1 == TYPEQUAL_VARYING) {
                 if ($2->IsVoidType()) {
                     Error(@1, "\"varying\" qualifier is illegal with \"void\" type.");
-                    $$ = NULL;
+                    $$ = nullptr;
                 }
                 else
                     $$ = $2->GetAsVaryingType();
@@ -1237,7 +1491,7 @@ specifier_qualifier_list
         else {
             if (m->errorCount == 0)
                 Error(@1, "Lost type qualifier in parser.");
-            $$ = NULL;
+            $$ = nullptr;
         }
     }
     ;
@@ -1247,18 +1501,18 @@ struct_declarator_list
     : struct_declarator
       {
           std::vector<Declarator *> *sdl = new std::vector<Declarator *>;
-          if ($1 != NULL)
+          if ($1 != nullptr)
               sdl->push_back($1);
           $$ = sdl;
       }
     | struct_declarator_list ',' struct_declarator
       {
           std::vector<Declarator *> *sdl = (std::vector<Declarator *> *)$1;
-          if (sdl == NULL) {
+          if (sdl == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               sdl = new std::vector<Declarator *>;
           }
-          if ($3 != NULL)
+          if ($3 != nullptr)
               sdl->push_back($3);
           $$ = sdl;
       }
@@ -1273,52 +1527,73 @@ struct_declarator
     ;
 
 enum_identifier
-    : TOKEN_IDENTIFIER { $$ = strdup(yytext); }
+    : TOKEN_IDENTIFIER
+      {
+          $$ = strdup(yytext);
+          lCleanUpString($1);
+      }
+    ;
 
 enum_specifier
     : TOKEN_ENUM '{' enumerator_list '}'
       {
-          $$ = lCreateEnumType(NULL, $3, @1);
+          $$ = lCreateEnumType(nullptr, $3, @1);
+          // enumerator_list returns aux vector that is not needed anymore.
+          delete $3;
       }
     | TOKEN_ENUM enum_identifier '{' enumerator_list '}'
       {
           $$ = lCreateEnumType($2, $4, @2);
+          // allocated by strdup in enum_identifier
+          free((char*)$2);
+
+          // enumerator_list returns aux vector that is not needed anymore.
+          delete $4;
       }
     | TOKEN_ENUM '{' enumerator_list ',' '}'
       {
-          $$ = lCreateEnumType(NULL, $3, @1);
+          $$ = lCreateEnumType(nullptr, $3, @1);
+          // enumerator_list returns aux vector that is not needed anymore.
+          delete $3;
       }
     | TOKEN_ENUM enum_identifier '{' enumerator_list ',' '}'
       {
           $$ = lCreateEnumType($2, $4, @2);
+          // allocated by strdup in enum_identifier
+          free((char*)$2);
+
+          // enumerator_list returns aux vector that is not needed anymore.
+          delete $4;
       }
     | TOKEN_ENUM enum_identifier
       {
           const Type *type = m->symbolTable->LookupType($2);
-          if (type == NULL) {
+          if (type == nullptr) {
               std::vector<std::string> alternates = m->symbolTable->ClosestEnumTypeMatch($2);
               std::string alts = lGetAlternates(alternates);
               Error(@2, "Enum type \"%s\" unknown.%s", $2, alts.c_str());
-              $$ = NULL;
+              $$ = nullptr;
           }
           else {
               const EnumType *enumType = CastType<EnumType>(type);
-              if (enumType == NULL) {
+              if (enumType == nullptr) {
                   Error(@2, "Type \"%s\" is not an enum type (%s).", $2,
                         type->GetString().c_str());
-                  $$ = NULL;
+                  $$ = nullptr;
               }
               else
                   $$ = enumType;
           }
+          // allocated by strdup in enum_identifier
+          free((char*)$2);
       }
     ;
 
 enumerator_list
     : enumerator
       {
-          if ($1 == NULL)
-              $$ = NULL;
+          if ($1 == nullptr)
+              $$ = nullptr;
           else {
               std::vector<Symbol *> *el = new std::vector<Symbol *>;
               el->push_back($1);
@@ -1328,11 +1603,11 @@ enumerator_list
     | enumerator_list ',' enumerator
       {
           std::vector<Symbol *> *symList = $1;
-          if (symList == NULL) {
+          if (symList == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               symList = new std::vector<Symbol *>;
           }
-          if ($3 != NULL)
+          if ($3 != nullptr)
               symList->push_back($3);
           $$ = symList;
       }
@@ -1341,20 +1616,34 @@ enumerator_list
 enumerator
     : enum_identifier
       {
-          $$ = new Symbol($1, @1);
+          $$ = new Symbol($1, @1, Symbol::SymbolKind::Enumerator);
+          // allocated by strdup in enum_identifier
+          free((char*)$1);
       }
     | enum_identifier '=' constant_expression
       {
-          int value;
-          if ($1 != NULL && $3 != NULL &&
-              lGetConstantInt($3, &value, @3, "Enumerator value")) {
-              Symbol *sym = new Symbol($1, @1);
-              sym->constValue = new ConstExpr(AtomicType::UniformUInt32->GetAsConstType(),
-                                              (uint32_t)value, @3);
+          std::variant<std::monostate, int, Symbol*> value;
+          if ($1 != nullptr && $3 != nullptr &&
+              lGetConstantIntOrSymbol($3, &value, @3, "Enumerator value")) {
+              Symbol *sym = new Symbol($1, @1, Symbol::SymbolKind::Enumerator);
+
+              // Check if value holds an int
+              if (std::holds_alternative<int>(value)) {
+                  int intValue = std::get<int>(value);
+                  sym->constValue = new ConstExpr(AtomicType::UniformUInt32->GetAsConstType(),
+                                                  (uint32_t)intValue, @3);
+              } else {
+                  Error(@3, "Enumerator value must be a compile-time constant.");
+                  $$ = nullptr;
+              }
               $$ = sym;
           }
-          else
-              $$ = NULL;
+          else {
+              $$ = nullptr;
+          }
+
+          // allocated by strdup in enum_identifier
+          free((char*)$1);
       }
     ;
 
@@ -1387,27 +1676,27 @@ type_qualifier_list
 declarator
     : pointer direct_declarator
     {
-        if ($1 != NULL) {
+        if ($1 != nullptr) {
             Declarator *tail = $1;
-            while (tail->child != NULL)
+            while (tail->child != nullptr)
                tail = tail->child;
             tail->child = $2;
             $$ = $1;
         }
         else
-            $$ = NULL;
+            $$ = nullptr;
     }
     | reference direct_declarator
     {
-        if ($1 != NULL) {
+        if ($1 != nullptr) {
             Declarator *tail = $1;
-            while (tail->child != NULL)
+            while (tail->child != nullptr)
                tail = tail->child;
             tail->child = $2;
             $$ = $1;
         }
         else
-            $$ = NULL;
+            $$ = nullptr;
     }
     | direct_declarator
     ;
@@ -1425,6 +1714,16 @@ direct_declarator
           Declarator *d = new Declarator(DK_BASE, @1);
           d->name = yytext;
           $$ = d;
+          lCleanUpString($1);
+      }
+    // For the purpose of declaration, template_name token is no different from identifier token,
+    // it needs to be processed in the same way. Semantic checks will be done later.
+    | TOKEN_TEMPLATE_NAME
+      {
+          Declarator *d = new Declarator(DK_BASE, @1);
+          d->name = yytext;
+          $$ = d;
+          lCleanUpString($1);
       }
     | '(' declarator ')'
     {
@@ -1432,62 +1731,78 @@ direct_declarator
     }
     | direct_declarator '[' constant_expression ']'
     {
-        int size;
-        if ($1 != NULL && lGetConstantInt($3, &size, @3, "Array dimension")) {
-            if (size < 0) {
-                Error(@3, "Array dimension must be non-negative.");
-                $$ = NULL;
-            }
-            else {
+        std::variant<std::monostate, int, Symbol*> size;
+        if ($1 != nullptr && lGetConstantIntOrSymbol($3, &size, @3, "Array dimension")) {
+            // Check if size holds an int
+            if (std::holds_alternative<int>(size)) {
+                int intValue = std::get<int>(size);
+                if (intValue < 0) {
+                    Error(@3, "Array dimension must be non-negative.");
+                    $$ = nullptr;
+                } else {
+                    Declarator *d = new Declarator(DK_ARRAY, Union(@1, @4));
+                    d->arraySize = intValue;
+                    d->child = $1;
+                    $$ = d;
+                }
+            } else if (std::holds_alternative<Symbol*>(size)) {
+                // Handle the case where size holds a Symbol*
+                Symbol* symbolValuePtr = std::get<Symbol*>(size);
                 Declarator *d = new Declarator(DK_ARRAY, Union(@1, @4));
-                d->arraySize = size;
+                d->arraySize = symbolValuePtr;
                 d->child = $1;
                 $$ = d;
+            } else {
+                $$ = nullptr;    
             }
         }
-        else
-            $$ = NULL;
+        else {
+            $$ = nullptr;
+        }
     }
     | direct_declarator '[' ']'
     {
-        if ($1 != NULL) {
+        if ($1 != nullptr) {
             Declarator *d = new Declarator(DK_ARRAY, Union(@1, @3));
             d->arraySize = 0; // unsize
             d->child = $1;
             $$ = d;
         }
         else
-            $$ = NULL;
+            $$ = nullptr;
     }
     | direct_declarator '[' error ']'
     {
-         $$ = NULL;
+         $$ = nullptr;
     }
     | direct_declarator '(' parameter_type_list ')'
       {
-          if ($1 != NULL) {
+          if ($1 != nullptr) {
               Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @4));
               d->child = $1;
-              if ($3 != NULL)
+              if ($3 != nullptr) {
                   d->functionParams = *$3;
+                  // parameter_type_list returns vector of Declarations that is not needed anymore.
+                  delete $3;
+              }
               $$ = d;
           }
           else
-              $$ = NULL;
+              $$ = nullptr;
       }
     | direct_declarator '(' ')'
       {
-          if ($1 != NULL) {
+          if ($1 != nullptr) {
               Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @3));
               d->child = $1;
               $$ = d;
           }
           else
-              $$ = NULL;
+              $$ = nullptr;
       }
     | direct_declarator '(' error ')'
     {
-        $$ = NULL;
+        $$ = nullptr;
     }
     ;
 
@@ -1535,23 +1850,23 @@ parameter_list
     : parameter_declaration
     {
         std::vector<Declaration *> *dl = new std::vector<Declaration *>;
-        if ($1 != NULL)
+        if ($1 != nullptr)
             dl->push_back($1);
         $$ = dl;
     }
     | parameter_list ',' parameter_declaration
     {
         std::vector<Declaration *> *dl = (std::vector<Declaration *> *)$1;
-        if (dl == NULL)
+        if (dl == nullptr)
             dl = new std::vector<Declaration *>;
-        if ($3 != NULL)
+        if ($3 != nullptr)
             dl->push_back($3);
         $$ = dl;
     }
     | error ','
     {
         lSuggestParamListAlternates();
-        $$ = NULL;
+        $$ = nullptr;
     }
     ;
 
@@ -1562,24 +1877,24 @@ parameter_declaration
     }
     | declaration_specifiers declarator '=' initializer
     {
-        if ($1 != NULL && $2 != NULL) {
+        if ($1 != nullptr && $2 != nullptr) {
             $2->initExpr = $4;
             $$ = new Declaration($1, $2);
         }
         else
-            $$ = NULL;
+            $$ = nullptr;
     }
     | declaration_specifiers abstract_declarator
     {
-        if ($1 != NULL && $2 != NULL)
+        if ($1 != nullptr && $2 != nullptr)
             $$ = new Declaration($1, $2);
         else
-            $$ = NULL;
+            $$ = nullptr;
     }
     | declaration_specifiers
     {
-        if ($1 == NULL)
-            $$ = NULL;
+        if ($1 == nullptr)
+            $$ = nullptr;
         else
             $$ = new Declaration($1);
     }
@@ -1596,10 +1911,10 @@ type_name
     : specifier_qualifier_list
     | specifier_qualifier_list abstract_declarator
     {
-        if ($1 == NULL || $2 == NULL)
-            $$ = NULL;
+        if ($1 == nullptr || $2 == nullptr)
+            $$ = nullptr;
         else {
-            $2->InitFromType($1, NULL);
+            $2->InitFromType($1, nullptr);
             $$ = $2->type;
         }
     }
@@ -1613,8 +1928,8 @@ abstract_declarator
     | direct_abstract_declarator
     | pointer direct_abstract_declarator
       {
-          if ($2 == NULL)
-              $$ = NULL;
+          if ($2 == nullptr)
+              $$ = nullptr;
           else {
               Declarator *d = new Declarator(DK_POINTER, Union(@1, @2));
               d->child = $2;
@@ -1627,8 +1942,8 @@ abstract_declarator
       }
     | reference direct_abstract_declarator
       {
-          if ($2 == NULL)
-              $$ = NULL;
+          if ($2 == nullptr)
+              $$ = nullptr;
           else {
               Declarator *d = new Declarator(DK_REFERENCE, Union(@1, @2));
               d->child = $2;
@@ -1648,25 +1963,37 @@ direct_abstract_declarator
       }
     | '[' constant_expression ']'
       {
-        int size;
-        if ($2 != NULL && lGetConstantInt($2, &size, @2, "Array dimension")) {
-            if (size < 0) {
-                Error(@2, "Array dimension must be non-negative.");
-                $$ = NULL;
-            }
-            else {
+        std::variant<std::monostate, int, Symbol*> size;
+        if ($2 != nullptr && lGetConstantIntOrSymbol($2, &size, @2, "Array dimension")) {
+            // Check if size holds an int
+            if (std::holds_alternative<int>(size)) {
+                int intValue = std::get<int>(size);
+                if (intValue < 0) {
+                    Error(@2, "Array dimension must be non-negative.");
+                    $$ = nullptr;
+                } else {
+                    Declarator *d = new Declarator(DK_ARRAY, Union(@1, @3));
+                    d->arraySize = intValue;
+                    $$ = d;
+                }
+            } else if (std::holds_alternative<Symbol*>(size)) {
+                // Handle the case where size holds a Symbol*
+                Symbol* symbolValuePtr = std::get<Symbol*>(size);
                 Declarator *d = new Declarator(DK_ARRAY, Union(@1, @3));
-                d->arraySize = size;
+                d->arraySize = symbolValuePtr;
                 $$ = d;
+            } else {
+                $$ = nullptr;    
             }
         }
-        else
-            $$ = NULL;
+        else {
+            $$ = nullptr;
+        }
       }
     | direct_abstract_declarator '[' ']'
       {
-          if ($1 == NULL)
-              $$ = NULL;
+          if ($1 == nullptr)
+              $$ = nullptr;
           else {
               Declarator *d = new Declarator(DK_ARRAY, Union(@1, @3));
               d->arraySize = 0;
@@ -1676,34 +2003,51 @@ direct_abstract_declarator
       }
     | direct_abstract_declarator '[' constant_expression ']'
       {
-          int size;
-          if ($1 != NULL && $3 != NULL && lGetConstantInt($3, &size, @3, "Array dimension")) {
-              if (size < 0) {
-                  Error(@3, "Array dimension must be non-negative.");
-                  $$ = NULL;
-              }
-              else {
+          std::variant<std::monostate, int, Symbol*> size;
+          if ($1 != nullptr && $3 != nullptr && lGetConstantIntOrSymbol($3, &size, @3, "Array dimension")) {
+              // Check if size holds an int
+              if (std::holds_alternative<int>(size)) {
+                  int intValue = std::get<int>(size);
+                  if (intValue < 0) {
+                      Error(@3, "Array dimension must be non-negative.");
+                      $$ = nullptr;
+                  } else {
+                      Declarator *d = new Declarator(DK_ARRAY, Union(@1, @4));
+                      d->arraySize = intValue;
+                      d->child = $1;
+                      $$ = d;
+                  }
+              } else if (std::holds_alternative<Symbol*>(size)) {
+                  // Handle the case where size holds a Symbol*
+                  Symbol* symbolValuePtr = std::get<Symbol*>(size);
                   Declarator *d = new Declarator(DK_ARRAY, Union(@1, @4));
-                  d->arraySize = size;
+                  d->arraySize = symbolValuePtr;
                   d->child = $1;
                   $$ = d;
+              } else {
+                  $$ = nullptr;  
               }
           }
-          else
-              $$ = NULL;
+          else {
+              $$ = nullptr;
+          }
       }
     | '(' ')'
       { $$ = new Declarator(DK_FUNCTION, Union(@1, @2)); }
     | '(' parameter_type_list ')'
       {
           Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @3));
-          if ($2 != NULL) d->functionParams = *$2;
+          if ($2 != nullptr) {
+              d->functionParams = *$2;
+              // parameter_type_list returns vector of Declarations that is not needed anymore.
+              delete $2;
+          }
           $$ = d;
       }
     | direct_abstract_declarator '(' ')'
       {
-          if ($1 == NULL)
-              $$ = NULL;
+          if ($1 == nullptr)
+              $$ = nullptr;
           else {
               Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @3));
               d->child = $1;
@@ -1712,12 +2056,16 @@ direct_abstract_declarator
       }
     | direct_abstract_declarator '(' parameter_type_list ')'
       {
-          if ($1 == NULL)
-              $$ = NULL;
+          if ($1 == nullptr)
+              $$ = nullptr;
           else {
               Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @4));
               d->child = $1;
-              if ($3 != NULL) d->functionParams = *$3;
+              if ($3 != nullptr) {
+                  d->functionParams = *$3;
+                  // parameter_type_list returns vector of Declarations that is not needed anymore.
+                  delete $3;
+              }
               $$ = d;
           }
       }
@@ -1735,7 +2083,7 @@ initializer_list
     | initializer_list ',' initializer
       {
           ExprList *exprList = $1;
-          if (exprList == NULL) {
+          if (exprList == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               exprList = new ExprList(@3);
           }
@@ -1755,11 +2103,13 @@ pragma
 attributed_statement
     : pragma attributed_statement
     {
-        if (($1->aType == PragmaAttributes::AttributeType::pragmaloop) && ($2 != NULL)) {
+        if (($1->aType == PragmaAttributes::AttributeType::pragmaloop) && ($2 != nullptr)) {
             std::pair<Globals::pragmaUnrollType, int> unrollVal = std::pair<Globals::pragmaUnrollType, int>($1->unrollType, $1->count);
             $2->SetLoopAttribute(unrollVal);
         }
         $$ = $2;
+        // deallocate yylval.pragmaAttributes returned from pragma and allocated in lPragmaUnroll
+        delete $1;
     }
     | statement
     ;
@@ -1780,7 +2130,7 @@ statement
     | error ';'
     {
         lSuggestBuiltinAlternates();
-        $$ = NULL;
+        $$ = nullptr;
     }
     ;
 
@@ -1788,16 +2138,26 @@ labeled_statement
     : goto_identifier ':' attributed_statement
     {
         $$ = new LabeledStmt($1, $3, @1);
+        // allocated by strdup in goto_identifier
+        free((char*)$1);
     }
     | TOKEN_CASE constant_expression ':' attributed_statement
       {
-          int value;
-          if ($2 != NULL &&
-              lGetConstantInt($2, &value, @2, "Case statement value")) {
-              $$ = new CaseStmt(value, $4, Union(@1, @2));
+          std::variant<std::monostate, int, Symbol*> value;
+          if ($2 != nullptr &&
+              lGetConstantIntOrSymbol($2, &value, @2, "Case statement value")) {
+              // Check if value holds an int
+              if (std::holds_alternative<int>(value)) {
+                  int intValue = std::get<int>(value);
+                  $$ = new CaseStmt(intValue, $4, Union(@1, @2));
+              } else {
+                  Error(@2, "Case statement value must be a compile-time constant or template non-type parameter.");
+                  $$ = nullptr;
+              }
           }
-          else
-              $$ = NULL;
+          else {
+              $$ = nullptr;
+          }
       }
     | TOKEN_DEFAULT ':' attributed_statement
       { $$ = new DefaultStmt($3, @1); }
@@ -1812,7 +2172,7 @@ end_scope
     ;
 
 compound_statement
-    : '{' '}' { $$ = NULL; }
+    : '{' '}' { $$ = nullptr; }
     | start_scope statement_list end_scope { $$ = $2; }
     ;
 
@@ -1826,7 +2186,7 @@ statement_list
     | statement_list attributed_statement
       {
           StmtList *sl = (StmtList *)$1;
-          if (sl == NULL) {
+          if (sl == nullptr) {
               AssertPos(@1, m->errorCount > 0);
               sl = new StmtList(@2);
           }
@@ -1836,17 +2196,17 @@ statement_list
     ;
 
 expression_statement
-    : ';' { $$ = NULL; }
-    | expression ';' { $$ = $1 ? new ExprStmt($1, @1) : NULL; }
+    : ';' { $$ = nullptr; }
+    | expression ';' { $$ = $1 ? new ExprStmt($1, @1) : nullptr; }
     ;
 
 selection_statement
     : TOKEN_IF '(' expression ')' attributed_statement
-      { $$ = new IfStmt($3, $5, NULL, false, @1); }
+      { $$ = new IfStmt($3, $5, nullptr, false, @1); }
     | TOKEN_IF '(' expression ')' attributed_statement TOKEN_ELSE attributed_statement
       { $$ = new IfStmt($3, $5, $7, false, @1); }
     | TOKEN_CIF '(' expression ')' attributed_statement
-      { $$ = new IfStmt($3, $5, NULL, true, @1); }
+      { $$ = new IfStmt($3, $5, nullptr, true, @1); }
     | TOKEN_CIF '(' expression ')' attributed_statement TOKEN_ELSE attributed_statement
       { $$ = new IfStmt($3, $5, $7, true, @1); }
     | TOKEN_SWITCH '(' expression ')' attributed_statement
@@ -1855,7 +2215,7 @@ selection_statement
 
 for_test
     : ';'
-      { $$ = NULL; }
+      { $$ = nullptr; }
     | expression ';'
       { $$ = $1; }
     ;
@@ -1884,7 +2244,8 @@ foreach_tiled_scope
 foreach_identifier
     : TOKEN_IDENTIFIER
     {
-        $$ = new Symbol(yytext, @1, AtomicType::VaryingInt32->GetAsConstType());
+        $$ = new Symbol(yytext, @1, Symbol::SymbolKind::Variable, AtomicType::VaryingInt32->GetAsConstType());
+        lCleanUpString($1);
     }
     ;
 
@@ -1895,7 +2256,8 @@ foreach_active_scope
 foreach_active_identifier
     : TOKEN_IDENTIFIER
     {
-        $$ = new Symbol(yytext, @1, AtomicType::UniformInt64->GetAsConstType());
+        $$ = new Symbol(yytext, @1, Symbol::SymbolKind::Variable, AtomicType::UniformInt64->GetAsConstType());
+        lCleanUpString($1);
     }
     ;
 
@@ -1938,11 +2300,11 @@ foreach_dimension_list
     | foreach_dimension_list ',' foreach_dimension_specifier
     {
         std::vector<ForeachDimension *> *dv = $1;
-        if (dv == NULL) {
+        if (dv == nullptr) {
             AssertPos(@1, m->errorCount > 0);
             dv = new std::vector<ForeachDimension *>;
         }
-        if ($3 != NULL)
+        if ($3 != nullptr)
             dv->push_back($3);
         $$ = dv;
     }
@@ -1953,20 +2315,24 @@ foreach_unique_scope
     ;
 
 foreach_unique_identifier
-    : TOKEN_IDENTIFIER { $$ = yylval.stringVal->c_str(); }
+    : TOKEN_IDENTIFIER
+      {
+          $$ = strdup($1->c_str());
+          lCleanUpString($1);
+      }
     ;
 
 iteration_statement
     : TOKEN_WHILE '(' expression ')' attributed_statement
-      { $$ = new ForStmt(NULL, $3, NULL, $5, false, @1); }
+      { $$ = new ForStmt(nullptr, $3, nullptr, $5, false, @1); }
     | TOKEN_CWHILE '(' expression ')' attributed_statement
-      { $$ = new ForStmt(NULL, $3, NULL, $5, true, @1); }
+      { $$ = new ForStmt(nullptr, $3, nullptr, $5, true, @1); }
     | TOKEN_DO attributed_statement TOKEN_WHILE '(' expression ')' ';'
       { $$ = new DoStmt($5, $2, false, @1); }
     | TOKEN_CDO attributed_statement TOKEN_WHILE '(' expression ')' ';'
       { $$ = new DoStmt($5, $2, true, @1); }
     | for_scope '(' for_init_statement for_test ')' attributed_statement
-      { $$ = new ForStmt($3, $4, NULL, $6, false, @1);
+      { $$ = new ForStmt($3, $4, nullptr, $6, false, @1);
         m->symbolTable->PopScope();
       }
     | for_scope '(' for_init_statement for_test expression ')' attributed_statement
@@ -1974,7 +2340,7 @@ iteration_statement
         m->symbolTable->PopScope();
       }
     | cfor_scope '(' for_init_statement for_test ')' attributed_statement
-      { $$ = new ForStmt($3, $4, NULL, $6, true, @1);
+      { $$ = new ForStmt($3, $4, nullptr, $6, true, @1);
         m->symbolTable->PopScope();
       }
     | cfor_scope '(' for_init_statement for_test expression ')' attributed_statement
@@ -1984,7 +2350,7 @@ iteration_statement
     | foreach_scope '(' foreach_dimension_list ')'
      {
          std::vector<ForeachDimension *> *dims = $3;
-         if (dims == NULL) {
+         if (dims == nullptr) {
              AssertPos(@3, m->errorCount > 0);
              dims = new std::vector<ForeachDimension *>;
          }
@@ -1994,7 +2360,7 @@ iteration_statement
      attributed_statement
      {
          std::vector<ForeachDimension *> *dims = $3;
-         if (dims == NULL) {
+         if (dims == nullptr) {
              AssertPos(@3, m->errorCount > 0);
              dims = new std::vector<ForeachDimension *>;
          }
@@ -2008,11 +2374,18 @@ iteration_statement
          }
          $$ = new ForeachStmt(syms, begins, ends, $6, false, @1);
          m->symbolTable->PopScope();
+
+         // deallocate ForeachDimension elements allocated in foreach_dimension_specifier
+         for (unsigned int i = 0; i < dims->size(); ++i)
+             delete (*dims)[i];
+
+         // deallocate std::vector<ForeachDimension*> allocated in foreach_dimension_list
+         delete dims;
      }
     | foreach_tiled_scope '(' foreach_dimension_list ')'
      {
          std::vector<ForeachDimension *> *dims = $3;
-         if (dims == NULL) {
+         if (dims == nullptr) {
              AssertPos(@3, m->errorCount > 0);
              dims = new std::vector<ForeachDimension *>;
          }
@@ -2023,7 +2396,7 @@ iteration_statement
      attributed_statement
      {
          std::vector<ForeachDimension *> *dims = $3;
-         if (dims == NULL) {
+         if (dims == nullptr) {
              AssertPos(@1, m->errorCount > 0);
              dims = new std::vector<ForeachDimension *>;
          }
@@ -2037,10 +2410,17 @@ iteration_statement
          }
          $$ = new ForeachStmt(syms, begins, ends, $6, true, @1);
          m->symbolTable->PopScope();
+
+         // deallocate ForeachDimension elements allocated in foreach_dimension_specifier
+         for (unsigned int i = 0; i < dims->size(); ++i)
+             delete (*dims)[i];
+
+         // deallocate std::vector<ForeachDimension*> allocated in foreach_dimension_list
+         delete dims;
      }
     | foreach_active_scope '(' foreach_active_identifier ')'
      {
-         if ($3 != NULL)
+         if ($3 != nullptr)
              m->symbolTable->AddVariable($3);
      }
      attributed_statement
@@ -2053,11 +2433,11 @@ iteration_statement
      {
          Expr *expr = $5;
          const Type *type;
-         if (expr != NULL &&
-             (expr = TypeCheck(expr)) != NULL &&
-             (type = expr->GetType()) != NULL) {
+         if (expr != nullptr &&
+             (expr = TypeCheck(expr)) != nullptr &&
+             (type = expr->GetType()) != nullptr) {
              const Type *iterType = type->GetAsUniformType()->GetAsConstType();
-             Symbol *sym = new Symbol($3, @3, iterType);
+             Symbol *sym = new Symbol($3, @3, Symbol::SymbolKind::Variable, iterType);
              m->symbolTable->AddVariable(sym);
          }
      }
@@ -2065,22 +2445,33 @@ iteration_statement
      {
          $$ = new ForeachUniqueStmt($3, $5, $8, @1);
          m->symbolTable->PopScope();
+
+         // allocated by strdup in foreach_unique_identifier
+         free((char*)$3);
      }
     ;
 
 goto_identifier
-    : TOKEN_IDENTIFIER { $$ = yylval.stringVal->c_str(); }
+    : TOKEN_IDENTIFIER
+      {
+          $$ = strdup($1->c_str());
+          lCleanUpString($1);
+      }
     ;
 
 jump_statement
     : TOKEN_GOTO goto_identifier ';'
-      { $$ = new GotoStmt($2, @1, @2); }
+      {
+          $$ = new GotoStmt($2, @1, @2);
+          // allocated by strdup in goto_identifier
+          free((char*)$2);
+      }
     | TOKEN_CONTINUE ';'
       { $$ = new ContinueStmt(@1); }
     | TOKEN_BREAK ';'
       { $$ = new BreakStmt(@1); }
     | TOKEN_RETURN ';'
-      { $$ = new ReturnStmt(NULL, @1); }
+      { $$ = new ReturnStmt(nullptr, @1); }
     | TOKEN_RETURN expression ';'
       { $$ = new ReturnStmt($2, @1); }
     ;
@@ -2107,11 +2498,15 @@ unmasked_statement
 print_statement
     : TOKEN_PRINT '(' string_constant ')' ';'
       {
-           $$ = new PrintStmt(*$3, NULL, @1);
+           $$ = new PrintStmt(*$3, nullptr, @1);
+           // deallocate std::string of string_constant
+           lCleanUpString($3);
       }
     | TOKEN_PRINT '(' string_constant ',' argument_expression_list ')' ';'
       {
            $$ = new PrintStmt(*$3, $5, @1);
+           // deallocate std::string of string_constant
+           lCleanUpString($3);
       }
     ;
 
@@ -2119,6 +2514,8 @@ assert_statement
     : TOKEN_ASSERT '(' string_constant ',' expression ')' ';'
       {
           $$ = new AssertStmt(*$3, $5, @1);
+          // deallocate std::string of string_constant
+          lCleanUpString($3);
       }
     ;
 
@@ -2130,16 +2527,19 @@ translation_unit
 
 external_declaration
     : function_definition
+    | template_function_declaration_or_definition
+    | template_function_specialization
+    | template_function_instantiation
     | TOKEN_EXTERN TOKEN_STRING_C_LITERAL '{' declaration '}'
     | TOKEN_EXTERN TOKEN_STRING_SYCL_LITERAL '{' declaration '}'
     | TOKEN_EXPORT '{' type_specifier_list '}' ';'
     {
-        if ($3 != NULL)
+        if ($3 != nullptr)
             m->AddExportedTypes(*$3);
     }
     | declaration
     {
-        if ($1 != NULL)
+        if ($1 != nullptr)
             for (unsigned int i = 0; i < $1->declarators.size(); ++i)
                 lAddDeclaration($1->declSpecs, $1->declarators[i]);
     }
@@ -2150,6 +2550,7 @@ function_definition
     : declaration_specifiers declarator
     {
         lAddDeclaration($1, $2);
+        m->symbolTable->PushScope();
         lAddFunctionParams($2);
         lAddMaskToSymbolTable(@2);
         if ($1->typeQualifiers & TYPEQUAL_TASK)
@@ -2157,16 +2558,17 @@ function_definition
     }
     compound_statement
     {
-        if ($2 != NULL) {
+        if ($2 != nullptr) {
+            // FIXME: Next list is redundant, as it's done in lAddDeclaration()
             $2->InitFromDeclSpecs($1);
             const FunctionType *funcType = CastType<FunctionType>($2->type);
-            if (funcType == NULL)
+            if (funcType == nullptr)
                 AssertPos(@1, m->errorCount > 0);
             else if ($1->storageClass == SC_TYPEDEF)
                 Error(@1, "Illegal \"typedef\" provided with function definition.");
             else {
                 Stmt *code = $4;
-                if (code == NULL) code = new StmtList(@4);
+                if (code == nullptr) code = new StmtList(@4);
                 m->AddFunctionDefinition($2->name, funcType, code);
             }
         }
@@ -2182,6 +2584,422 @@ func(...)
 */
     ;
 
+template_type_parameter
+    : TOKEN_TYPENAME TOKEN_IDENTIFIER
+      {
+          $$ = new TemplateTypeParmType(*$<stringVal>2, Variability::VarType::Unbound, false, Union(@1, @2));
+          lCleanUpString($<stringVal>2);
+      }
+    | TOKEN_TYPENAME TOKEN_IDENTIFIER '=' type_specifier
+      {
+          $$ = new TemplateTypeParmType(*$<stringVal>2, Variability::VarType::Unbound, false, Union(@1, @2));
+          lCleanUpString($<stringVal>2);
+          // TODO: implement
+          Error(@4, "Default values for template type parameters are not yet supported.");
+      }
+    ;
+
+int_constant_type
+    : TOKEN_INT8   { $$ = AtomicType::UniformInt8->GetAsConstType(); }
+    | TOKEN_INT16  { $$ = AtomicType::UniformInt16->GetAsConstType(); }
+    | TOKEN_INT    { $$ = AtomicType::UniformInt32->GetAsConstType(); }
+    | TOKEN_INT64  { $$ = AtomicType::UniformInt64->GetAsConstType(); }
+    | TOKEN_UINT8  { $$ = AtomicType::UniformUInt8->GetAsConstType(); }
+    | TOKEN_UINT16 { $$ = AtomicType::UniformUInt16->GetAsConstType(); }
+    | TOKEN_UINT   { $$ = AtomicType::UniformUInt32->GetAsConstType(); }
+    | TOKEN_UINT64 { $$ = AtomicType::UniformUInt64->GetAsConstType(); }
+    | TOKEN_BOOL   { $$ = AtomicType::UniformBool->GetAsConstType(); }
+    ;
+
+template_int_constant_type
+    : TOKEN_UNIFORM int_constant_type { $$ = $2; }
+    | int_constant_type { $$ = $1;}
+    ;
+
+template_int_parameter
+    : template_int_constant_type TOKEN_IDENTIFIER
+      {
+          $$ = new Symbol(*$<stringVal>2, Union(@1, @2), Symbol::SymbolKind::TemplateNonTypeParm, $1);
+          lCleanUpString($2);
+      }
+      | template_int_constant_type TOKEN_IDENTIFIER '=' int_constant
+      {
+          $$ = new Symbol(*$<stringVal>2, Union(@1, @2), Symbol::SymbolKind::TemplateNonTypeParm, $1);
+          lCleanUpString($2);
+          // TODO: implement
+          Error(@4, "Default values for template non-type parameters are not yet supported.");
+      }
+    ;
+
+template_enum_parameter
+    : TOKEN_TYPE_NAME TOKEN_IDENTIFIER
+      {
+          const Type *type = m->symbolTable->LookupType($1->c_str());
+          const EnumType *enumType = CastType<EnumType>(type);
+          if (enumType == nullptr) {
+            Error(@1, "Only enum types and integral types are allowed as non-type template parameters.");
+          }
+          $$ = new Symbol(*$<stringVal>2, Union(@1, @2), Symbol::SymbolKind::TemplateNonTypeParm, enumType->GetAsConstType()->GetAsUniformType());
+          lCleanUpString($1);
+          lCleanUpString($2);
+      }
+
+template_parameter
+    : template_type_parameter
+    {
+        if ($1 != nullptr) {
+            $$ = new TemplateParam($1);
+        }
+    }
+    | template_int_parameter
+    {
+        if ($1 != nullptr) {
+            $$ = new TemplateParam($1);
+        }
+    }
+    | template_enum_parameter
+    {
+        if ($1 != nullptr) {
+            $$ = new TemplateParam($1);
+        }
+    }
+    ;
+
+template_parameter_list
+    : template_parameter
+      {
+          TemplateParms *list = new TemplateParms();
+          if ($1 != nullptr) {
+              list->Add($1);
+          }
+          $$ = list;
+      }
+    | template_parameter_list ',' template_parameter
+      {
+          TemplateParms *list = (TemplateParms *) $1;
+          if (list == nullptr) {
+              AssertPos(@1, m->errorCount > 0);
+              list = new TemplateParms();
+          }
+          if ($3 != nullptr) {
+              list->Add($3);
+          }
+          $$ = list;
+      }
+    ;
+
+template_head
+    : TOKEN_TEMPLATE '<' template_parameter_list '>'
+      {
+          $$ = $3;
+      }
+    ;
+
+template_declaration
+    : template_head
+      {
+          // Scope for template parameters definition
+          m->symbolTable->PushScope();
+          TemplateParms *list = (TemplateParms *) $1;
+          for(size_t i = 0; i < list->GetCount(); i++) {
+              std::string name = (*list)[i]->GetName();
+              SourcePos pos = (*list)[i]->GetSourcePos();
+              if ((*list)[i]->IsTypeParam()) {
+                  m->AddTypeDef(name, (*list)[i]->GetTypeParam(), pos);
+              } else if ((*list)[i]->IsNonTypeParam()) {
+                  m->symbolTable->AddVariable((*list)[i]->GetNonTypeParam());
+              }
+          }
+      }
+      declaration_specifiers declarator
+      {
+          lAddTemplateDeclaration($1, $3, $4);
+          lAddFunctionParams($4);
+          lAddMaskToSymbolTable(@4);
+          const FunctionType *ft = CastType<FunctionType>($4->type);
+          // Creating a new TemplateSymbol just to pass it further seems to be a waste
+          $$ = new TemplateSymbol($1, $4->name, ft, $3->storageClass, @4, false /*not used*/, false /*not used*/);
+      }
+    ;
+
+template_function_declaration_or_definition
+    : template_declaration ';'
+      {
+          // deallocate TemplateSymbol created in template_declaration
+          delete $1;
+          // End templates parameters definition scope
+          m->symbolTable->PopScope();
+      }
+    | template_declaration compound_statement
+      {
+          if ($1 != nullptr) {
+              Stmt *code = $2;
+              if (code == nullptr) code = new StmtList(@2);
+              m->AddFunctionTemplateDefinition($1->templateParms, $1->name, $1->type, code);
+              // deallocate TemplateSymbol created in template_declaration
+              delete $1;
+          }
+
+          // End templates parameters definition scope
+          m->symbolTable->PopScope();
+      }
+    ;
+
+template_argument
+    : rate_qualified_type_specifier
+    {
+        $$ = new TemplateArg($1, @1);
+    }
+    // Ideally we should use here constant_expression, however, there is grammar ambiguitiy between
+    // template_identifier '<' template_argument_list '>' in simple_template_id and
+    // relational_expression '<' shift_expression in relational_expression (part of constant_expression).
+    | TOKEN_INT8_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformInt8->GetAsConstType(),
+                           (int8_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_UINT8_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformUInt8->GetAsConstType(),
+                           (uint8_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_INT16_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformInt16->GetAsConstType(),
+                           (int16_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_UINT16_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformUInt16->GetAsConstType(),
+                           (uint16_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_INT32_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformInt32->GetAsConstType(),
+                           (int32_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_UINT32_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformUInt32->GetAsConstType(),
+                           (uint32_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_INT64_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformInt64->GetAsConstType(),
+                           (int64_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_UINT64_CONSTANT {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformUInt64->GetAsConstType(),
+                           (uint64_t)yylval.intVal, @1), @1);
+    }
+    | TOKEN_TRUE {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformBool->GetAsConstType(), true, @1), @1);
+    }
+    | TOKEN_FALSE {
+        $$ = new TemplateArg(new ConstExpr(AtomicType::UniformBool->GetAsConstType(), false, @1), @1);
+    }
+    // Enums and nested templates case:
+    | TOKEN_IDENTIFIER
+    {
+        const char *name = $1->c_str();
+        Symbol *s = m->symbolTable->LookupVariable(name);
+        if (s) {
+            if (s->GetSymbolKind() == Symbol::SymbolKind::Enumerator ||
+                s->GetSymbolKind() == Symbol::SymbolKind::TemplateNonTypeParm) {
+                $$ = new TemplateArg(new SymbolExpr(s, @1), @1);
+            } else {
+                Error(@1, "Only integral, enum types and non-type template parameters are allowed as template arguments.");
+                $$ = nullptr;
+            }
+        } else {
+            Error(@1, "Unknown identifier");
+            $$ = nullptr;
+        }
+        lCleanUpString($1);
+    }
+    ;
+
+template_argument_list
+    : template_argument
+      {
+          TemplateArgs *templArgs = new TemplateArgs();
+          if ($1 != nullptr) {
+            templArgs->push_back(*$1);
+          }
+          $$ = templArgs;
+
+      }
+    | template_argument_list ',' template_argument
+      {
+          TemplateArgs *templArgs = (TemplateArgs *) $1;
+          if ($3 != nullptr) {
+            templArgs->push_back(*$3);
+          }
+          $$ = templArgs;
+      }
+    ;
+
+template_identifier
+    : TOKEN_TEMPLATE_NAME
+    {
+        $$ = strdup(yytext);
+        lCleanUpString($1);
+    }
+    ;
+
+simple_template_id
+    : template_identifier '<' template_argument_list '>'
+      {
+          // Template ID declartor
+          Declarator *d = new Declarator(DK_BASE, @1);
+          d->name = $1;
+          // allocated by strdup in template_identifier
+          free((char*)$1);
+          // Arguments vector
+          TemplateArgs *templArgs = (TemplateArgs *) $3;
+          // Bundle template ID declarator and type list.
+          $$ = new std::pair(d, templArgs);
+      }
+    | template_identifier
+      {
+          // Template ID declartor
+          Declarator *d = new Declarator(DK_BASE, @1);
+          d->name = $1;
+          // allocated by strdup in template_identifier
+          free((char*)$1);
+          // Arguments vector
+          TemplateArgs *templArgs = new TemplateArgs();
+          // Bundle template ID declarator and empty type list.
+          $$ = new std::pair(d, templArgs);
+      }
+
+    ;
+
+ // template int foo<int>(int);
+template_function_instantiation
+    : TOKEN_TEMPLATE declaration_specifiers simple_template_id '(' parameter_type_list ')' ';'
+      {
+          SimpleTemplateIDType *simpleTemplID = (SimpleTemplateIDType *) $3;
+
+          // Function declarator
+          Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @6));
+          d->child = simpleTemplID->first;
+          if ($5 != nullptr) {
+              d->functionParams = *$5;
+              // parameter_type_list returns vector of Declarations that is not needed anymore.
+              delete $5;
+          }
+
+          d->InitFromDeclSpecs($2);
+          lCheckTemplateDeclSpecs($2, d->pos, TemplateType::Instantiation, $3->first->name.c_str());
+          const FunctionType *ftype = CastType<FunctionType>(d->type);
+          bool isInline = ($2->typeQualifiers & TYPEQUAL_INLINE);
+          bool isNoInline = ($2->typeQualifiers & TYPEQUAL_NOINLINE);
+          if ($3->second->size() == 0) {
+              Error(d->pos, "Template arguments deduction is not yet supported in explicit template instantiation.");
+          }
+          m->AddFunctionTemplateInstantiation($3->first->name, *$3->second, ftype, $2->storageClass, isInline, isNoInline, Union(@1, @6));
+
+          // deallocate SimpleTemplateIDType returned by simple_template_id
+          lFreeSimpleTemplateID(simpleTemplID);
+      }
+    | TOKEN_TEMPLATE declaration_specifiers simple_template_id '(' ')' ';'
+      {
+          SimpleTemplateIDType *simpleTemplID = (SimpleTemplateIDType *) $3;
+
+          // Function declarator
+          Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @5));
+          d->child = simpleTemplID->first;
+
+          d->InitFromDeclSpecs($2);
+          lCheckTemplateDeclSpecs($2, d->pos, TemplateType::Instantiation, $3->first->name.c_str());
+          const FunctionType *ftype = CastType<FunctionType>(d->type);
+          bool isInline = ($2->typeQualifiers & TYPEQUAL_INLINE);
+          bool isNoInline = ($2->typeQualifiers & TYPEQUAL_NOINLINE);
+          if ($3->second->size() == 0) {
+              Error(d->pos, "Template arguments deduction is not yet supported in explicit template instantiation.");
+          }
+          m->AddFunctionTemplateInstantiation($3->first->name, *$3->second, ftype, $2->storageClass, isInline, isNoInline, Union(@1, @5));
+
+          // deallocate SimpleTemplateIDType returned by simple_template_id
+          lFreeSimpleTemplateID(simpleTemplID);
+      }
+    | TOKEN_TEMPLATE declaration_specifiers simple_template_id '(' error ')' ';'
+      {
+          // deallocate SimpleTemplateIDType returned by simple_template_id
+          lFreeSimpleTemplateID($3);
+      }
+    ;
+
+// Template specialization, a-la
+// template <> int foo<int>(int) { ... }
+template_function_specialization_declaration
+    : TOKEN_TEMPLATE '<' '>' declaration_specifiers simple_template_id '(' parameter_type_list ')'
+      {
+        // Function declarator
+        Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @8));
+        d->child = $5->first;
+
+        if ($7 != nullptr) {
+            d->functionParams = *$7;
+            // parameter_type_list returns vector of Declarations that is not needed anymore.
+            delete $7;
+        }
+        TemplateArgs *templArgs = new TemplateArgs(*$5->second);
+        Assert(templArgs);
+        lAddTemplateSpecialization(*templArgs, $4, d);
+        m->symbolTable->PushScope();
+
+        lAddFunctionParams(d);
+        lAddMaskToSymbolTable(@5);
+        // deallocate SimpleTemplateIDType returned by simple_template_id
+        lFreeSimpleTemplateID($5);
+        $$ = new std::pair(d, templArgs);
+      }
+    | TOKEN_TEMPLATE '<' '>' declaration_specifiers simple_template_id '(' ')'
+      {
+        Declarator *d = new Declarator(DK_FUNCTION, Union(@1, @5));
+        d->child = $5->first;
+        TemplateArgs *templArgs = new TemplateArgs(*$5->second);
+        Assert(templArgs);
+        lAddTemplateSpecialization(*templArgs, $4, d);
+        m->symbolTable->PushScope();
+
+        lAddMaskToSymbolTable(@5);
+        // deallocate SimpleTemplateIDType returned by simple_template_id
+        lFreeSimpleTemplateID($5);
+        $$ = new std::pair(d, templArgs);
+      }
+    | TOKEN_TEMPLATE '<' '>' declaration_specifiers simple_template_id '(' error ')'
+      {
+        m->symbolTable->PushScope();
+        // deallocate SimpleTemplateIDType returned by simple_template_id
+        lFreeSimpleTemplateID($5);
+        $$ = nullptr;
+      }
+    ;
+
+template_function_specialization
+    : template_function_specialization_declaration ';'
+      {
+          if ($1 != nullptr) {
+            // deallocate TemplateSymbol created in template_declaration
+            lFreeSimpleTemplateID($1);
+          }
+          // End templates parameters definition scope
+          m->symbolTable->PopScope();
+      }
+    | template_function_specialization_declaration compound_statement
+      {
+        if ($1 != nullptr) {
+            Declarator *d = $1->first;
+            const FunctionType *ftype = CastType<FunctionType>(d->type);
+            if (ftype == nullptr)
+                AssertPos(@1, m->errorCount > 0);
+            else {
+                Stmt *code = $2;
+                if (code == nullptr) code = new StmtList(@2);
+                m->AddFunctionTemplateSpecializationDefinition(d->name, ftype, *$1->second, Union(@1, @2), code);
+            }
+           lFreeSimpleTemplateID($1);
+        }
+        m->symbolTable->PopScope();
+      }
+    ;
+
 %%
 
 
@@ -2192,6 +3010,22 @@ void yyerror(const char *s) {
         Error(yylloc, "%s.", s);
 }
 
+void lCleanUpString(std::string *s) {
+    if (s) {
+         delete s;
+    }
+}
+
+void lFreeSimpleTemplateID(void *p) {
+    SimpleTemplateIDType *sid = (SimpleTemplateIDType*) p;
+    TemplateArgs *templArgs = sid->second;
+    if (templArgs) {
+        delete templArgs;
+    }
+    if (sid) {
+        delete sid;
+    }
+}
 
 static int
 lYYTNameErr (char *yyres, const char *yystr)
@@ -2200,7 +3034,7 @@ lYYTNameErr (char *yyres, const char *yystr)
   Assert(tokenNameRemap.size() > 0);
   if (tokenNameRemap.find(yystr) != tokenNameRemap.end()) {
       std::string n = tokenNameRemap[yystr];
-      if (yyres == NULL)
+      if (yyres == nullptr)
           return n.size();
       else
           return yystpcpy(yyres, n.c_str()) - yyres;
@@ -2274,15 +3108,21 @@ lSuggestParamListAlternates() {
 
 static void
 lAddDeclaration(DeclSpecs *ds, Declarator *decl) {
-    if (ds == NULL || decl == NULL)
+    if (ds == nullptr || decl == nullptr)
         // Error happened earlier during parsing
         return;
 
     decl->InitFromDeclSpecs(ds);
-    if (ds->storageClass == SC_TYPEDEF)
-        m->AddTypeDef(decl->name, decl->type, decl->pos);
-    else {
-        if (decl->type == NULL) {
+    if (ds->storageClass == SC_TYPEDEF) {
+        const StructType *st = CastType<StructType>(decl->type);
+        if (st && st->IsAnonymousType()) {
+            st = st->GetAsNamed(decl->name);
+            m->AddTypeDef(decl->name, st, decl->pos);
+        } else {
+            m->AddTypeDef(decl->name, decl->type, decl->pos);
+        }
+    } else {
+        if (decl->type == nullptr) {
             Assert(m->errorCount > 0);
             return;
         }
@@ -2290,36 +3130,143 @@ lAddDeclaration(DeclSpecs *ds, Declarator *decl) {
         decl->type = decl->type->ResolveUnboundVariability(Variability::Varying);
 
         const FunctionType *ft = CastType<FunctionType>(decl->type);
-        if (ft != NULL) {
+        if (ft != nullptr) {
             bool isInline = (ds->typeQualifiers & TYPEQUAL_INLINE);
             bool isNoInline = (ds->typeQualifiers & TYPEQUAL_NOINLINE);
             bool isVectorCall = (ds->typeQualifiers & TYPEQUAL_VECTORCALL);
             bool isRegCall = (ds->typeQualifiers & TYPEQUAL_REGCALL);
-            m->AddFunctionDeclaration(decl->name, ft, ds->storageClass,
+            Declarator *funcDecl = decl;
+            if (decl->kind == DK_POINTER || decl->kind == DK_REFERENCE) {
+                funcDecl = decl->child;
+            }
+            m->AddFunctionDeclaration(decl->name, ft, ds->storageClass, funcDecl,
                                       isInline, isNoInline, isVectorCall, isRegCall, decl->pos);
         }
         else {
             bool isConst = (ds->typeQualifiers & TYPEQUAL_CONST) != 0;
-            m->AddGlobalVariable(decl->name, decl->type, decl->initExpr,
-                                 isConst, decl->storageClass, decl->pos);
+            m->AddGlobalVariable(decl, isConst);
         }
     }
 }
 
+static void
+lCheckTemplateDeclSpecs(DeclSpecs *ds, SourcePos pos, TemplateType type, const char* name) {
+    std::string templateTypeStr;
+    switch (type) {
+        case TemplateType::Template:
+            templateTypeStr = "function template";
+            break;
+        case TemplateType::Instantiation:
+            templateTypeStr = "template instantiation";
+            break;
+        case TemplateType::Specialization:
+            templateTypeStr = "template specialization";
+            break;
+        default:
+            FATAL("Unhandled template type in lCheckTemplateDeclSpecs");
+    }
+    if (ds->typeQualifiers & TYPEQUAL_TASK){
+        Error(pos, "'task' not supported for %s.", templateTypeStr.c_str());
+        return;
+    }
+    if (ds->typeQualifiers & TYPEQUAL_EXPORT) {
+        Error(pos, "'export' not supported for %s.", templateTypeStr.c_str());
+        return;
+    }
+    if (ds->storageClass == SC_TYPEDEF) {
+        Error(pos, "Illegal \"typedef\" provided with %s.", templateTypeStr.c_str());
+        return;
+    }
+    // We can't support extern "C"/extern "SYCL" for templates because
+    // we need mangling information.
+    if (ds->storageClass == SC_EXTERN_C || ds->storageClass == SC_EXTERN_SYCL) {
+        Error(pos, "Illegal linkage provided with %s.", templateTypeStr.c_str());
+        return;
+    }
+    Assert(ds->storageClass == SC_NONE || ds->storageClass == SC_STATIC || ds->storageClass == SC_EXTERN);
+    bool isVectorCall = (ds->typeQualifiers & TYPEQUAL_VECTORCALL);
+    if (isVectorCall) {
+        Error(pos, "Illegal to use \"__vectorcall\" qualifier on non-extern function \"%s\".", name);
+    }
+    bool isRegCall = (ds->typeQualifiers & TYPEQUAL_REGCALL);
+    if (isRegCall) {
+        Error(pos, "Illegal to use \"__regcall\" qualifier on non-extern function \"%s\".", name);
+    }
+}
+
+static void
+lAddTemplateDeclaration(TemplateParms *templateParmList, DeclSpecs *ds, Declarator *decl) {
+    if (ds == nullptr || decl == nullptr) {
+        // Error happened earlier during parsing
+        return;
+    }
+
+    decl->InitFromDeclSpecs(ds);
+    lCheckTemplateDeclSpecs(ds, decl->pos, TemplateType::Template, decl->name.c_str());
+
+    if (decl->type == nullptr) {
+        Assert(m->errorCount > 0);
+        return;
+    }
+
+    const FunctionType *ft = CastType<FunctionType>(decl->type);
+    if (ft != nullptr) {
+        bool isInline = (ds->typeQualifiers & TYPEQUAL_INLINE);
+        bool isNoInline = (ds->typeQualifiers & TYPEQUAL_NOINLINE);
+        m->AddFunctionTemplateDeclaration(templateParmList, decl->name, ft, ds->storageClass,
+                                          isInline, isNoInline, decl->pos);
+    }
+    else {
+        Error(decl->pos, "Only function templates are supported.");
+    }
+
+}
+
+static void
+lAddTemplateSpecialization(const TemplateArgs &templArgs, DeclSpecs *ds, Declarator *decl) {
+    if (ds == nullptr || decl == nullptr)
+        // Error happened earlier during parsing
+        return;
+
+    decl->InitFromDeclSpecs(ds);
+    lCheckTemplateDeclSpecs(ds, decl->pos, TemplateType::Specialization, decl->name.c_str());
+
+    if (decl->type == nullptr) {
+        Assert(m->errorCount > 0);
+        return;
+    }
+
+    if (templArgs.size() == 0) {
+        Error(decl->pos, "Template arguments deduction is not yet supported in template function specialization.");
+        return;
+    }
+
+    const FunctionType *ftype = CastType<FunctionType>(decl->type);
+    if (ftype != nullptr) {
+        bool isInline = (ds->typeQualifiers & TYPEQUAL_INLINE);
+        bool isNoInline = (ds->typeQualifiers & TYPEQUAL_NOINLINE);
+        m->AddFunctionTemplateSpecializationDeclaration(decl->name, ftype, templArgs, ds->storageClass,
+                                                        isInline, isNoInline, decl->pos);
+    }
+    else {
+        Error(decl->pos, "Only function template specializations are supported.");
+    }
+}
 
 /** We're about to start parsing the body of a function; add all of the
     parameters to the symbol table so that they're available.
 */
 static void
 lAddFunctionParams(Declarator *decl) {
-    m->symbolTable->PushScope();
-
-    if (decl == NULL) {
+    // It's responsibility of the caller to create a new symbol table scope.
+    // For regular functions, the scope starts before function parameters.
+    // For template functions, the scope starts before template parameters.
+    if (decl == nullptr) {
         return;
     }
 
     // walk down to the declarator for the function itself
-    while (decl->kind != DK_FUNCTION && decl->child != NULL)
+    while (decl->kind != DK_FUNCTION && decl->child != nullptr)
         decl = decl->child;
     if (decl->kind != DK_FUNCTION) {
         AssertPos(decl->pos, m->errorCount > 0);
@@ -2329,13 +3276,19 @@ lAddFunctionParams(Declarator *decl) {
     // now loop over its parameters and add them to the symbol table
     for (unsigned int i = 0; i < decl->functionParams.size(); ++i) {
         Declaration *pdecl = decl->functionParams[i];
-        Assert(pdecl != NULL && pdecl->declarators.size() == 1);
+        Assert(pdecl != nullptr && pdecl->declarators.size() == 1);
         Declarator *declarator = pdecl->declarators[0];
-        if (declarator == NULL)
+        if (declarator == nullptr)
             AssertPos(decl->pos, m->errorCount > 0);
         else {
-            Symbol *sym = new Symbol(declarator->name, declarator->pos,
+            Symbol *sym = new Symbol(declarator->name, declarator->pos, Symbol::SymbolKind::FunctionParm,
                                      declarator->type, declarator->storageClass);
+
+            AttributeList *AL = declarator->attributeList;
+            if (AL) {
+                // Check for unknown attributes for parameters in function definitions.
+                AL->CheckForUnknownAttributes(declarator->pos);
+            }
 #ifndef NDEBUG
             bool ok = m->symbolTable->AddVariable(sym);
             if (ok == false)
@@ -2353,7 +3306,7 @@ lAddFunctionParams(Declarator *decl) {
 
 /** Add a symbol for the built-in mask variable to the symbol table */
 static void lAddMaskToSymbolTable(SourcePos pos) {
-    const Type *t = NULL;
+    const Type *t = nullptr;
     switch (g->target->getMaskBitCount()) {
     case 1:
         t = AtomicType::VaryingBool;
@@ -2375,7 +3328,7 @@ static void lAddMaskToSymbolTable(SourcePos pos) {
     }
 
     t = t->GetAsConstType();
-    Symbol *maskSymbol = new Symbol("__mask", pos, t);
+    Symbol *maskSymbol = new Symbol("__mask", pos, Symbol::SymbolKind::Default, t);
     m->symbolTable->AddVariable(maskSymbol);
 }
 
@@ -2385,31 +3338,31 @@ static void lAddMaskToSymbolTable(SourcePos pos) {
 static void lAddThreadIndexCountToSymbolTable(SourcePos pos) {
     const Type *type = AtomicType::UniformUInt32->GetAsConstType();
 
-    Symbol *threadIndexSym = new Symbol("threadIndex", pos, type);
+    Symbol *threadIndexSym = new Symbol("threadIndex", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(threadIndexSym);
 
-    Symbol *threadCountSym = new Symbol("threadCount", pos, type);
+    Symbol *threadCountSym = new Symbol("threadCount", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(threadCountSym);
 
-    Symbol *taskIndexSym = new Symbol("taskIndex", pos, type);
+    Symbol *taskIndexSym = new Symbol("taskIndex", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskIndexSym);
-    
-    Symbol *taskCountSym = new Symbol("taskCount", pos, type);
+
+    Symbol *taskCountSym = new Symbol("taskCount", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskCountSym);
-    
-    Symbol *taskIndexSym0 = new Symbol("taskIndex0", pos, type);
+
+    Symbol *taskIndexSym0 = new Symbol("taskIndex0", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskIndexSym0);
-    Symbol *taskIndexSym1 = new Symbol("taskIndex1", pos, type);
+    Symbol *taskIndexSym1 = new Symbol("taskIndex1", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskIndexSym1);
-    Symbol *taskIndexSym2 = new Symbol("taskIndex2", pos, type);
+    Symbol *taskIndexSym2 = new Symbol("taskIndex2", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskIndexSym2);
 
-    
-    Symbol *taskCountSym0 = new Symbol("taskCount0", pos, type);
+
+    Symbol *taskCountSym0 = new Symbol("taskCount0", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskCountSym0);
-    Symbol *taskCountSym1 = new Symbol("taskCount1", pos, type);
+    Symbol *taskCountSym1 = new Symbol("taskCount1", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskCountSym1);
-    Symbol *taskCountSym2 = new Symbol("taskCount2", pos, type);
+    Symbol *taskCountSym2 = new Symbol("taskCount2", pos, Symbol::SymbolKind::Default, type);
     m->symbolTable->AddVariable(taskCountSym2);
 }
 
@@ -2457,25 +3410,32 @@ lGetStorageClassString(StorageClass sc) {
     type, return false.
 */
 static bool
-lGetConstantInt(Expr *expr, int *value, SourcePos pos, const char *usage) {
-    if (expr == NULL)
+lGetConstantIntOrSymbol(Expr *expr, std::variant<std::monostate, int, Symbol*> *value, SourcePos pos, const char *usage) {
+    if (expr == nullptr)
         return false;
     expr = TypeCheck(expr);
-    if (expr == NULL)
+    if (expr == nullptr)
         return false;
     expr = Optimize(expr);
-    if (expr == NULL)
+    if (expr == nullptr)
         return false;
-
+    const SymbolExpr* se= llvm::dyn_cast<SymbolExpr>(expr);
+    if (se) {
+        Symbol* s = se->GetBaseSymbol();
+        if (s->GetSymbolKind() == Symbol::SymbolKind::TemplateNonTypeParm) {
+            value->emplace<Symbol*>(s);
+            return true;
+        }
+    }
     std::pair<llvm::Constant *, bool> cValPair = expr->GetConstant(expr->GetType());
     llvm::Constant *cval = cValPair.first;
-    if (cval == NULL) {
-        Error(pos, "%s must be a compile-time constant.", usage);
+    if (cval == nullptr) {
+        Error(pos, "%s must be a compile-time constant or template non-type parameter.", usage);
         return false;
     }
     else {
         llvm::ConstantInt *ci = llvm::dyn_cast<llvm::ConstantInt>(cval);
-        if (ci == NULL) {
+        if (ci == nullptr) {
             Error(pos, "%s must be a compile-time integer constant.", usage);
             return false;
         }
@@ -2484,10 +3444,8 @@ lGetConstantInt(Expr *expr, int *value, SourcePos pos, const char *usage) {
             return false;
         }
         const Type *type = expr->GetType();
-        if (type->IsUnsignedType())
-            *value = (int)ci->getZExtValue();
-        else
-            *value = (int)ci->getSExtValue();
+        int resultValue = type->IsUnsignedType() ? (int)ci->getZExtValue() : (int)ci->getSExtValue();
+        value->emplace<int>(resultValue);
         return true;
     }
 }
@@ -2495,11 +3453,11 @@ lGetConstantInt(Expr *expr, int *value, SourcePos pos, const char *usage) {
 
 static EnumType *
 lCreateEnumType(const char *name, std::vector<Symbol *> *enums, SourcePos pos) {
-    if (enums == NULL)
-        return NULL;
+    if (enums == nullptr)
+        return nullptr;
 
     EnumType *enumType = name ? new EnumType(name, pos) : new EnumType(pos);
-    if (name != NULL)
+    if (name != nullptr)
         m->symbolTable->AddType(name, enumType, pos);
 
     lFinalizeEnumeratorSymbols(*enums, enumType);
@@ -2531,7 +3489,7 @@ lFinalizeEnumeratorSymbols(std::vector<Symbol *> &enums,
 
     for (unsigned int i = 0; i < enums.size(); ++i) {
         enums[i]->type = enumType;
-        if (enums[i]->constValue != NULL) {
+        if (enums[i]->constValue != nullptr) {
             /* Already has a value, so first update nextVal with it. */
             int count = enums[i]->constValue->GetValues(&nextVal);
             AssertPos(enums[i]->pos, count == 1);
@@ -2547,7 +3505,7 @@ lFinalizeEnumeratorSymbols(std::vector<Symbol *> &enums,
                                               enums[i]->pos);
             castExpr = Optimize(castExpr);
             enums[i]->constValue = llvm::dyn_cast<ConstExpr>(castExpr);
-            AssertPos(enums[i]->pos, enums[i]->constValue != NULL);
+            AssertPos(enums[i]->pos, enums[i]->constValue != nullptr);
         }
         else {
             enums[i]->constValue = new ConstExpr(enumType, nextVal++,

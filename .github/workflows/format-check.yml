@@ -1,24 +1,35 @@
+# Copyright 2020-2025, Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+
 name: Check code formatting
+
+permissions: read-all
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_REPO: https://github.com/ispc/ispc.dependencies
+
 jobs:
   check-format:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      LLVM_VERSION: "18.1"
+      LLVM_TAR: llvm-18.1.8-ubuntu22.04-Release+Asserts-x86.arm.wasm.tar.xz
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       with:
         submodules: true
 
     - name: Install dependencies
       run: |
-        echo "APT::Acquire::Retries \"3\";" | sudo tee -a /etc/apt/apt.conf.d/80-retries
-        sudo apt-get update
-        sudo apt-get install -y clang-format-12 clang-12
-        sudo ln -sf /usr/bin/clang-12 /usr/bin/clang
-        sudo ln -sf /usr/bin/clang-format-12 /usr/bin/clang-format
+        .github/workflows/scripts/install-build-deps.sh
 
     - name: Check format
       run: |
-        ./check_format.sh
+        ./scripts/check_format.sh

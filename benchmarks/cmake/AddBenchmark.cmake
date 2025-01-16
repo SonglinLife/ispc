@@ -1,34 +1,7 @@
 #
-#  Copyright (c) 2020-2022, Intel Corporation
-#  All rights reserved.
+#  Copyright (c) 2020-2024, Intel Corporation
 #
-#  Redistribution and use in source and binary forms, with or without
-#  modification, are permitted provided that the following conditions are
-#  met:
-#
-#    * Redistributions of source code must retain the above copyright
-#      notice, this list of conditions and the following disclaimer.
-#
-#    * Redistributions in binary form must reproduce the above copyright
-#      notice, this list of conditions and the following disclaimer in the
-#      documentation and/or other materials provided with the distribution.
-#
-#    * Neither the name of Intel Corporation nor the names of its
-#      contributors may be used to endorse or promote products derived from
-#      this software without specific prior written permission.
-#
-#
-#   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-#   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-#   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-#   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-#   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-#   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-#   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-#   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-#   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-#   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  SPDX-License-Identifier: BSD-3-Clause
 
 if (ISPC_BUILD)
     set (ISPC_EXECUTABLE $<TARGET_FILE:ispc>)
@@ -57,6 +30,8 @@ if(UNIX)
         else()
             set(ISPC_ARCH "aarch64")
         endif()
+    elseif("${ARCH}" STREQUAL "aarch64")
+        set(ISPC_ARCH "aarch64")
     else()
         message(FATAL_ERROR "Cannot detect host architecture for benchamrks: ${ARCH}.")
     endif()
@@ -151,7 +126,7 @@ function(add_ispc_to_target)
             OUTPUT ${ISPC_TARGET_OBJS} ${ISPC_TARGET_HEADERS}
             COMMENT "Compiling ${ISPC_SRC_FILE} for ${BENCHMARKS_ISPC_TARGETS} target(s)"
             COMMAND           ${ISPC_EXECUTABLE} ${SRC_LOCATION} -o ${ISPC_OBJ} -h ${ISPC_HEADER} --arch=${ISPC_ARCH} --target=${BENCHMARKS_ISPC_TARGETS} ${ISPC_PIC} "$<JOIN:${FLAGS},;>"
-            DEPENDS ${ISPC_EXECUTABLE}
+            DEPENDS ${ISPC_EXECUTABLE} stdlibs-bc
             DEPENDS ${ISPC_SRC_FILE}
             COMMAND_EXPAND_LISTS
         )
@@ -199,13 +174,15 @@ macro(compile_benchmark_test name)
         PRIVATE BENCHMARKS_ISPC_TARGETS=\"${BENCHMARKS_ISPC_TARGETS}\"
                 BENCHMARKS_ISPC_FLAGS=\"${BENCHMARKS_ISPC_FLAGS}\")
 
-    # Turn on AVX2 support in the C++ compiler to be able to use AVX2 intrinsics.
-    if((CMAKE_CXX_COMPILER_ID MATCHES "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
-        add_compile_options(-mavx2)
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
-        add_compile_options(/QxAVX2)
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-        add_compile_options(/arch:AVX2)
+    if(${ISPC_ARCH} MATCHES "x86|x86-64")
+        # Turn on AVX2 support in the C++ compiler to be able to use AVX2 intrinsics.
+        if((CMAKE_CXX_COMPILER_ID MATCHES "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+            add_compile_options(-mavx2)
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "Intel")
+            add_compile_options(/QxAVX2)
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+            add_compile_options(/arch:AVX2)
+        endif()
     endif()
 
     # To enable google benchmarks:

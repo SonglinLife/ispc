@@ -1,13 +1,20 @@
-ARG LLVM_VERSION=13.0
+#
+#  Copyright (c) 2017-2024, Intel Corporation
+#
+#  SPDX-License-Identifier: BSD-3-Clause
 
-FROM ubuntu:18.04 AS llvm_build_step1
+ARG LLVM_VERSION=17.0
+
+FROM ubuntu:18.04 AS llvm_build
 LABEL maintainer="Dmitry Babokin <dmitry.y.babokin@intel.com>"
 SHELL ["/bin/bash", "-c"]
 
 ARG REPO=ispc/ispc
 ARG SHA=main
+ARG LTO=OFF
+ARG PGO=OFF
 ARG LLVM_VERSION
-ARG EXTRA_BUILD_ARG
+ARG LLVM_DISABLE_ASSERTIONS
 
 # !!! Make sure that your docker config provides enough memory to the container,
 # otherwise LLVM build may fail, as it will use all the cores available to container.
@@ -15,75 +22,98 @@ ARG EXTRA_BUILD_ARG
 RUN uname -a
 
 # Packages required to build ISPC and Clang.
-RUN apt-get -y update && apt-get --no-install-recommends install -y wget=1.19.4-1ubuntu2.2 build-essential=12.4ubuntu1 gcc=4:7.4.0-1ubuntu2.3 \
-    g++=4:7.4.0-1ubuntu2.3 git=1:2.17.1-1ubuntu0.13 python3-dev=3.6.7-1~18.04 libncurses5-dev=6.1-1ubuntu1.18.04 libtinfo-dev=6.1-1ubuntu1.18.04 ca-certificates=20211016~18.04.1 && \
+RUN apt-get -y update && apt-get --no-install-recommends install -y wget build-essential gcc g++ git ca-certificates libtbb-dev ninja-build && \
     rm -rf /var/lib/apt/lists/*
 
-# Download and install required version of cmake (3.14 for x86, 3.20 for aarch64, as earlier versions are not available as binary distribution) for ISPC build
-RUN if [[ $(uname -m) =~ "x86" ]]; then export CMAKE_URL="https://cmake.org/files/v3.14/cmake-3.14.0-Linux-x86_64.sh"; else export CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v3.20.3/cmake-3.20.3-linux-aarch64.sh"; fi && \
-    wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 $CMAKE_URL && mkdir /opt/cmake && sh cmake-*.sh --prefix=/opt/cmake --skip-license && \
-    ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake && rm -rf cmake-*.sh
+# Install multilib libc needed to build clang_rt
+RUN if [[ $(uname -m) =~ "x86" ]]; then \
+        export CROSS_LIBS="libc6-dev-i386=2.27-3ubuntu*"; \
+    else \
+        export CROSS_LIBS="libc6-dev-armhf-cross=2.27-3ubuntu*"; \
+    fi && \
+    apt-get -y update && apt-get --no-install-recommends install -y "$CROSS_LIBS" && \
+    rm -rf /var/lib/apt/lists/*
+
+# Download and install required version of cmake (3.23.5 for both x86 and aarch64) as required for superbuild preset jsons.
+RUN if [[ $(uname -m) =~ "x86" ]]; then \
+        export CMAKE_URL="https://cmake.org/files/v3.23/cmake-3.23.5-linux-x86_64.sh"; \
+    else \
+        export CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v3.23.5/cmake-3.23.5-linux-aarch64.sh"; \
+    fi && \
+    wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 $CMAKE_URL && \
+    sh cmake-*.sh --prefix=/usr/local --skip-license && rm -rf cmake-*.sh
+
+# Zlib is required to build Python3
+RUN apt-get -y update && \
+    apt-get -y --no-install-recommends install zlib1g-dev zlib1g && \
+    rm -rf /var/lib/apt/lists/*
+ENV PYTHON_VERSION=3.8.19
+RUN wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz && \
+    tar xf Python-${PYTHON_VERSION}.tgz && pushd Python-${PYTHON_VERSION} && \
+    ./configure CFLAGS=-fPIC CXXFLAGS=-fPIC && make -j"$(nproc)" && make install && \
+    popd && rm -rf /usr/local/src/*
 
 # If you are behind a proxy, you need to configure git.
-RUN if [ -v "$http_proxy" ]; then git config --global --add http.proxy "$http_proxy"; fi
+RUN if [ -v http_proxy ]; then git config --global --add http.proxy "$http_proxy"; fi
 
+ENV LLVM_HOME=/usr/local/src/llvm
 WORKDIR /usr/local/src
 
 # Fork ispc on github and clone *your* fork.
-RUN git clone https://github.com/$REPO.git ispc
-
-# This is home for Clang builds
-RUN mkdir /usr/local/src/llvm
-
-ENV ISPC_HOME=/usr/local/src/ispc
-ENV LLVM_HOME=/usr/local/src/llvm
-
 # If you are going to run test for future platforms, go to
 # http://www.intel.com/software/sde and download the latest version,
 # extract it, add to path and set SDE_HOME.
 
-WORKDIR /usr/local/src/ispc
-RUN git checkout $SHA
-
 # Build Clang with all required patches.
 # Pass required LLVM_VERSION with --build-arg LLVM_VERSION=<version>.
-# Note self-build options, it's required to build clang and ispc with the same compiler,
-# i.e. if clang was built by gcc, you may need to use gcc to build ispc (i.e. run "make gcc"),
-# or better do clang selfbuild and use it for ispc build as well (i.e. just "make").
-# "rm" are just to keep docker image small.
-RUN python3 ./alloy.py -b --version="$LLVM_VERSION" --selfbuild-phase1 --verbose "$EXTRA_BUILD_ARG" && \
-    rm -rf "$LLVM_HOME"/build-"$LLVM_VERSION"_temp
+RUN git clone https://github.com/$REPO.git ispc && \
+    git -C ispc checkout $SHA && \
+    cmake ispc/superbuild \
+        -B build \
+        --preset os \
+        -DLTO=$LTO \
+        -DXE_DEPS=OFF \
+        -DLLVM_VERSION="$LLVM_VERSION" \
+        -DBUILD_STAGE2_TOOLCHAIN_ONLY=ON \
+        -DCMAKE_INSTALL_PREFIX="$LLVM_HOME"/bin-"$LLVM_VERSION" \
+        -DLLVM_DISABLE_ASSERTIONS="$LLVM_DISABLE_ASSERTIONS" && \
+    cmake --build build && \
+    rm -rf build
 
-FROM llvm_build_step1 AS llvm_build_step2
-ARG LLVM_VERSION
-ARG EXTRA_BUILD_ARG
-
-RUN python3 ./alloy.py -b --version="$LLVM_VERSION" --selfbuild-phase2 --verbose "$EXTRA_BUILD_ARG" && \
-    rm -rf "$LLVM_HOME"/build-"$LLVM_VERSION" "$LLVM_HOME"/llvm-"$LLVM_VERSION" "$LLVM_HOME"/bin-"$LLVM_VERSION"_temp
 ENV PATH=$LLVM_HOME/bin-$LLVM_VERSION/bin:$PATH
 
-FROM llvm_build_step2 AS ispc_build
+FROM llvm_build AS ispc_build
+SHELL ["/bin/bash", "-c"]
+
+ARG LTO=OFF
+ARG PGO=OFF
 ARG LLVM_VERSION
 
-# ISPC builds in C++17 mode and will fail without modern libstdc++
-# Also install regular ISPC dependencies
-RUN if [[ $(uname -m) =~ "x86" ]]; then export CROSS_LIBS="libc6-dev-i386=2.27-3ubuntu1.6"; else export CROSS_LIBS="libc6-dev-armhf-cross=2.27-3ubuntu1cross1.1"; fi && \
-    apt-get -y update && apt-get --no-install-recommends install -y software-properties-common=0.96.24.32.18 && \
-    add-apt-repository ppa:ubuntu-toolchain-r/test -y && apt-get -y update && \
-    apt-get --no-install-recommends install -y libstdc++-9-dev=9.4.0-1ubuntu1~18.04 && \
-    apt-get --no-install-recommends install -y m4=1.4.18-1 bison=2:3.0.4.dfsg-1build1 flex=2.6.4-6 $CROSS_LIBS && \
+# Install regular ISPC dependencies
+RUN apt-get -y update && apt-get --no-install-recommends install -y m4 bison flex && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure ISPC build
-WORKDIR /usr/local/src/ispc
-RUN mkdir build_$LLVM_VERSION
-WORKDIR /usr/local/src/ispc/build_$LLVM_VERSION
-RUN cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local/src/ispc/bin-$LLVM_VERSION -DCMAKE_CXX_FLAGS=-Werror
+WORKDIR /usr/local/src
 
-# Build ISPC
-RUN make ispc -j"$(nproc)" && make check-all && make install
-WORKDIR /usr/local/src/ispc
-RUN rm -rf build_$LLVM_VERSION
+# Create new non-root user and switch to it
+RUN useradd -m -d /home/ispc_user -s /bin/bash -U ispc_user && \
+    chown -R ispc_user:ispc_user /usr
 
-#export path for ispc
+USER ispc_user
+
+# Configure and build ISPC
+RUN cmake ispc/superbuild \
+        -B build \
+        --preset os \
+        -DLTO=$LTO \
+        -DXE_DEPS=OFF \
+        -DCMAKE_CXX_FLAGS=-Werror \
+        -DPREBUILT_STAGE2_PATH="$LLVM_HOME"/bin-"$LLVM_VERSION" \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/src/ispc/bin-"$LLVM_VERSION" && \
+    cmake --build build && \
+    cmake --build build --target ispc-stage2-check-all && \
+    mv build/build-ispc-stage2/src/ispc-stage2-build/*.tar.gz ./ && \
+    rm -rf build
+
+# Export path for ispc
 ENV PATH=/usr/local/src/ispc/bin-$LLVM_VERSION/bin:$PATH

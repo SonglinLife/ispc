@@ -1,33 +1,6 @@
-;;  Copyright (c) 2020-2021, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2020-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 define(`WIDTH',`32')
 define(`MASK',`i8')
@@ -39,7 +12,6 @@ include(`util.m4')
 stdlib_core()
 scans()
 reduce_equal(WIDTH)
-rdrand_decls()
 halfTypeGenericImplementation()
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -83,6 +55,7 @@ define i1 @__none(<WIDTH x MASK> %mask) nounwind readnone alwaysinline {
 ;; broadcast/rotate/shift/shuffle
 
 define_shuffles()
+define_vector_permutations()
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; aos/soa
@@ -228,16 +201,16 @@ define double @__ceil_uniform_double(double) nounwind readonly alwaysinline {
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; round/floor/ceil varying float/doubles
 
-declare <8 x float> @llvm.nearbyint.v8f32(<8 x float> %p)
+declare <8 x float> @llvm.roundeven.v8f32(<8 x float> %p)
 declare <8 x float> @llvm.floor.v8f32(<8 x float> %p)
 declare <8 x float> @llvm.ceil.v8f32(<8 x float> %p)
 
 define <32 x float> @__round_varying_float(<32 x float> %v) nounwind readonly alwaysinline {
   v32tov8(float, %v, %v0, %v1, %v2, %v3)
-  %r0 = call <8 x float> @llvm.nearbyint.v8f32(<8 x float> %v0)
-  %r1 = call <8 x float> @llvm.nearbyint.v8f32(<8 x float> %v1)
-  %r2 = call <8 x float> @llvm.nearbyint.v8f32(<8 x float> %v2)
-  %r3 = call <8 x float> @llvm.nearbyint.v8f32(<8 x float> %v3)
+  %r0 = call <8 x float> @llvm.roundeven.v8f32(<8 x float> %v0)
+  %r1 = call <8 x float> @llvm.roundeven.v8f32(<8 x float> %v1)
+  %r2 = call <8 x float> @llvm.roundeven.v8f32(<8 x float> %v2)
+  %r3 = call <8 x float> @llvm.roundeven.v8f32(<8 x float> %v3)
   v8tov32(float, %r0, %r1, %r2, %r3, %r)
   ret <32 x float> %r
 }
@@ -262,20 +235,20 @@ define <32 x float> @__ceil_varying_float(<32 x float> %v) nounwind readonly alw
   ret <32 x float> %r
 }
 
-declare <4 x double> @llvm.nearbyint.v4f64(<4 x double> %p)
+declare <4 x double> @llvm.roundeven.v4f64(<4 x double> %p)
 declare <4 x double> @llvm.floor.v4f64(<4 x double> %p)
 declare <4 x double> @llvm.ceil.v4f64(<4 x double> %p)
 
 define <32 x double> @__round_varying_double(<32 x double> %v) nounwind readonly alwaysinline {
   v32tov4(double, %v, %v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7)
-  %r0 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v0)
-  %r1 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v1)
-  %r2 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v2)
-  %r3 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v3)
-  %r4 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v4)
-  %r5 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v5)
-  %r6 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v6)
-  %r7 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v7)
+  %r0 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v0)
+  %r1 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v1)
+  %r2 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v2)
+  %r3 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v3)
+  %r4 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v4)
+  %r5 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v5)
+  %r6 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v6)
+  %r7 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v7)
   v4tov32(double, %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7, %r)
   ret <32 x double> %r
 }
@@ -552,21 +525,6 @@ define <32 x float> @__rcp_fast_varying_float(<32 x float> %v) nounwind readnone
   ret <32 x float> %ret
 }
 
-
-;declare float @__rsqrt_uniform_float(float) nounwind readnone
-;declare float @__rcp_uniform_float(float) nounwind readnone
-;declare float @__rcp_fast_uniform_float(float) nounwind readnone
-;declare float @__rsqrt_fast_uniform_float(float) nounwind readnone
-;declare <WIDTH x float> @__rcp_varying_float(<WIDTH x float>) nounwind readnone
-;declare <WIDTH x float> @__rsqrt_varying_float(<WIDTH x float>) nounwind readnone
-;declare <WIDTH x float> @__rcp_fast_varying_float(<WIDTH x float>) nounwind readnone
-;declare <WIDTH x float> @__rsqrt_fast_varying_float(<WIDTH x float>) nounwind readnone
-
-;declare float @__sqrt_uniform_float(float) nounwind readnone
-;declare <WIDTH x float> @__sqrt_varying_float(<WIDTH x float>) nounwind readnone
-;declare double @__sqrt_uniform_double(double) nounwind readnone
-;declare <WIDTH x double> @__sqrt_varying_double(<WIDTH x double>) nounwind readnone
-
 ;; bit ops
 
 popcnt()
@@ -580,34 +538,6 @@ svml(ISA)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; reductions
-
-;declare i64 @__movmsk(<WIDTH x i1>) nounwind readnone
-;declare i1 @__any(<WIDTH x i1>) nounwind readnone
-;declare i1 @__all(<WIDTH x i1>) nounwind readnone
-;declare i1 @__none(<WIDTH x i1>) nounwind readnone
-
-;declare i16 @__reduce_add_int8(<WIDTH x i8>) nounwind readnone
-;declare i32 @__reduce_add_int16(<WIDTH x i16>) nounwind readnone
-
-;declare float @__reduce_add_float(<WIDTH x float>) nounwind readnone
-;declare float @__reduce_min_float(<WIDTH x float>) nounwind readnone
-;declare float @__reduce_max_float(<WIDTH x float>) nounwind readnone
-
-;declare i64 @__reduce_add_int32(<WIDTH x i32>) nounwind readnone alwaysinline
-;declare i32 @__reduce_min_int32(<WIDTH x i32>) nounwind readnone
-;declare i32 @__reduce_max_int32(<WIDTH x i32>) nounwind readnone
-;declare i32 @__reduce_min_uint32(<WIDTH x i32>) nounwind readnone
-;declare i32 @__reduce_max_uint32(<WIDTH x i32>) nounwind readnone
-
-;declare double @__reduce_add_double(<WIDTH x double>) nounwind readnone
-;declare double @__reduce_min_double(<WIDTH x double>) nounwind readnone
-;declare double @__reduce_max_double(<WIDTH x double>) nounwind readnone
-
-;declare i64 @__reduce_add_int64(<WIDTH x i64>) nounwind readnone
-;declare i64 @__reduce_min_int64(<WIDTH x i64>) nounwind readnone
-;declare i64 @__reduce_max_int64(<WIDTH x i64>) nounwind readnone
-;declare i64 @__reduce_min_uint64(<WIDTH x i64>) nounwind readnone
-;declare i64 @__reduce_max_uint64(<WIDTH x i64>) nounwind readnone
 
 ;; 8 bit
 declare <4 x i64> @llvm.x86.avx2.psad.bw(<32 x i8>, <32 x i8>) nounwind readnone
@@ -862,13 +792,6 @@ scatterbo32_64(double)
 
 ;; TODO better intrinsic implementation is available
 packed_load_and_store(FALSE)
-;declare i32 @__packed_load_active(i8 * nocapture, i8 * nocapture,
-;                                  <WIDTH x i1>) nounwind
-;declare i32 @__packed_store_active(i8 * nocapture, <WIDTH x i32> %vals,
-;                                   <WIDTH x i1>) nounwind
-;declare i32 @__packed_store_active2(i8 * nocapture, <WIDTH x i32> %vals,
-;                                   <WIDTH x i1>) nounwind
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; prefetch
@@ -876,19 +799,6 @@ packed_load_and_store(FALSE)
 ;; TODO: need to defined with intrinsics.
 define_prefetches()
 
-;declare void @__prefetch_read_uniform_1(i8 * nocapture) nounwind
-;declare void @__prefetch_read_uniform_2(i8 * nocapture) nounwind
-;declare void @__prefetch_read_uniform_3(i8 * nocapture) nounwind
-;declare void @__prefetch_read_uniform_nt(i8 * nocapture) nounwind
-
-;declare void @__prefetch_read_varying_1(<WIDTH x i64> %addr, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_1_native(i8 * %base, i32 %scale, <WIDTH x i32> %offsets, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_2(<WIDTH x i64> %addr, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_2_native(i8 * %base, i32 %scale, <WIDTH x i32> %offsets, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_3(<WIDTH x i64> %addr, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_3_native(i8 * %base, i32 %scale, <WIDTH x i32> %offsets, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_nt(<WIDTH x i64> %addr, <WIDTH x MASK> %mask) nounwind
-;declare void @__prefetch_read_varying_nt_native(i8 * %base, i32 %scale, <WIDTH x i32> %offsets, <WIDTH x MASK> %mask) nounwind
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; int8/int16 builtins
 
@@ -897,10 +807,12 @@ define_avgs()
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; reciprocals in double precision, if supported
 
-rsqrtd_decl()
-rcpd_decl()
 
-transcendetals_decl()
-trigonometry_decl()
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; rcp/rsqrt declarations for half
+
 
 saturation_arithmetic_novec()
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; dot product

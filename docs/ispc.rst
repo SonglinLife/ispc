@@ -66,6 +66,14 @@ Contents:
   + `Updating ISPC Programs For Changes In ISPC 1.16.0`_
   + `Updating ISPC Programs For Changes In ISPC 1.17.0`_
   + `Updating ISPC Programs For Changes In ISPC 1.18.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.19.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.20.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.21.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.22.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.23.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.24.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.25.0`_
+  + `Updating ISPC Programs For Changes In ISPC 1.26.0`_
 
 * `Getting Started with ISPC`_
 
@@ -79,6 +87,7 @@ Contents:
   + `Selecting 32 or 64 Bit Addressing`_
   + `The Preprocessor`_
   + `Debugging`_
+  + `Optimization Settings`_
   + `Other ways of passing arguments to ISPC`_
 
 * `The ISPC Parallel Execution Model`_
@@ -110,6 +119,7 @@ Contents:
   + `Types`_
 
     * `Basic Types and Type Qualifiers`_
+    * `Signed and Unsigned Integer Types`_
     * `"uniform" and "varying" Qualifiers`_
     * `Defining New Names For Types`_
     * `Pointer Types`_
@@ -125,6 +135,12 @@ Contents:
     * `Structure of Array Types`_
 
   + `Declarations and Initializers`_
+  + `Attributes`_
+
+    * `noescape`_
+    * `address_space`_
+    * `unmangled`_
+
   + `Expressions`_
 
     * `Dynamic Memory Allocation`_
@@ -155,6 +171,7 @@ Contents:
       + `Task Parallelism: Runtime Requirements`_
 
   + `LLVM Intrinsic Functions`_
+  + `Function Templates`_
 
 * `The ISPC Standard Library`_
 
@@ -167,8 +184,11 @@ Contents:
 
     * `Basic Math Functions`_
     * `Transcendental Functions`_
+    * `Saturating Arithmetic`_
+    * `Dot product`_
     * `Pseudo-Random Numbers`_
     * `Random Numbers`_
+
 
   + `Output Functions`_
   + `Assertions`_
@@ -374,7 +394,7 @@ Updating ISPC Programs For Changes In ISPC 1.10.0
 -------------------------------------------------
 
 The release has several new language features, which do not affect compatibility.
-Namely, new streaming stores, aos_to_soa/soa_to_aos instrinsics for 64 bit types,
+Namely, new streaming stores, aos_to_soa/soa_to_aos intrinsics for 64 bit types,
 and a "#pragma ignore".
 
 One change that potentially may affect compatibility - changed size of short vector
@@ -422,7 +442,7 @@ older versions:
 
 * Representation of ``bool`` type in storage was changed from target-specific to
   one byte per boolean value.  So size of ``varying bool`` is target width (in
-  bytes), and size of ``unform bool`` is one.  This definition is compatible
+  bytes), and size of ``uniform bool`` is one.  This definition is compatible
   with C/C++, hence improves interoperability.
 
 * type aliases for unsigned types were added: ``uint8``, ``uint16``, ``uint32``,
@@ -463,7 +483,7 @@ unroll pragmas: "#pragma unroll" and "#pragma nounroll".
 Updating ISPC Programs For Changes In ISPC 1.16.0
 -------------------------------------------------
 
-The release has several new functions in the standard library, that can possbily
+The release has several new functions in the standard library, that can possibly
 affect compatibility:
 
 * ``alloca()`` - refer to `Stack Memory Allocation`_ for more details.
@@ -513,6 +533,151 @@ when compiling of `Compiler Explorer`_), ``--ignore-preprocessor-errors`` switch
 was added to preserve this behavior.
 
 .. _Compiler Explorer: https://godbolt.org/
+
+Updating ISPC Programs For Changes In ISPC 1.19.0
+-------------------------------------------------
+
+New targets were added:
+
+* avx512spr-x4, avx512spr-x8, avx512spr-x16, avx512spr-x32, avx512spr-x64 for
+  4th generation Intel® Xeon® Scalable (codename Sapphire Rapids) CPUs. A macro
+  ISPC_TARGET_AVX512SPR was added.
+* xehpc-x16 and xehpc-x32 for Intel® Data Center GPU Max (codename Ponte Vecchio).
+
+Function templates were introduces to the language, please refer to `Function
+Templates`_ section for more details. Two new keywords were introduced: ``template``
+and ``typename``.
+
+``ISPC_FP16_SUPPORTED`` macro was introduced for the targets supporting FP16.
+
+Updating ISPC Programs For Changes In ISPC 1.20.0
+-------------------------------------------------
+
+New version of `sse4` targets were added, now you can specify either `sse4.1`
+or `sse4.2`, for example `sse4.2-i32x4`. The changes are fully backward
+compatible, meaning that `sse4` versions are still accepted and aliased to
+`sse4.2`. Multi-target compilation accepts only one of `sse4`/`sse4.1`/`sse4.2`
+targets. All of these targets will produce an object file with `sse4` suffix in
+multi-target compilation.
+
+Updating ISPC Programs For Changes In ISPC 1.21.0
+-------------------------------------------------
+
+Now, in case of signed integer overflow, `ispc` will assume undefined behavior similar to
+C and C++. This change may cause compatibility issues. You can manage this behavior by
+using the `--[no-]wrap-signed-int` compiler switch. The default behavior (before version
+1.21.0) can be preserved by using `--wrap-signed-int`, which maintains defined wraparound
+behavior for signed integers, though it may limit some compiler optimizations.
+
+Template function specializations with explicit template arguments were introduced to the
+language, please refer to `Function Templates`_ section for more details.
+
+Updating ISPC Programs For Changes In ISPC 1.22.0
+-------------------------------------------------
+
+Template operators with explicit specializations and instantiations were introduced to
+the language. The usage of different function specifiers with templates were fixed and
+aligned, please refer to `Function Templates`_ section for more details.
+
+Now, command-line switch `--dwarf-version=<n>` forces DWARF format debug info generation
+on Windows. It allows to debug ISPC code linked with MinGW generated code.
+
+Updating ISPC Programs For Changes In ISPC 1.23.0
+-------------------------------------------------
+
+This release contains the following changes that may affect compatibility with
+older versions:
+
+* `true` `bool` values in storage were changed from `-1` to `1` to match C/C++ ABI.
+  Previously, ISPC treated `bool` values similarly to C/C++ in terms of size, but
+  incorrectly interpreted their actual values. This meant that `true` in ISPC
+  might not have translated correctly to true in C/C++. This issue was introduced
+  in version 1.13.0. Starting now, ISPC correctly stores and interprets `true`
+  values in a way that aligns with C/C++ expectations.
+
+A couple of improvements have been made to variables initialization:
+
+* Variables with const qualifiers can be initialized using the values of
+  previously initialized const variables including arithmetic operations above
+  them. It now works also with varying types.
+* Enumeration type values can be used as constants.
+
+The result of selection operator can now be used as lvalue if it has suitable
+type.
+
+Updating ISPC Programs For Changes In ISPC 1.24.0
+-------------------------------------------------
+
+This release extends the standard library with new functions performing dot
+product operations. These functions utilize specific hardware instructions from
+AVX-VNNI and AVX512-VNNI. The ISPC targets that support native VNNI
+instructions are ``avx2vnni-i32x*``, ``avx512icl-*`` and ``avx512spr-*``. The
+first two targets (``avx2vnni-*`` and ``avx512icl-*``) were introduced in this
+release. Please refer to `Dot product`_ for more details.
+
+Now, uniform integers and enums can be used as non-type template parameters.
+Please refer to `Function Templates`_ for more details.
+
+The release contains the following changes that may affect compatibility with
+older versions:
+
+* ``--pic`` command line flag now corresponds to the ``-fpic`` flag of Clang
+  and GCC, whereas the newly introduced ``--PIC`` corresponds to ``-fPIC``.
+  The previous behavior of ``--pic`` flag corresponded to ``-fPIC`` flag. In
+  some cases, to preserve previous behavior, users may need to switch to
+  ``--PIC``.
+* Newly introduced macro definitions for numeric limits can cause conflicts
+  with user-defined macros with same names. When this happens, ISPC emits
+  warnings about macro redefinition. Please, refer to `The Preprocessor`_ for
+  the full list of macro definitions.
+* The implementation of ``round`` standard library function was aligned across
+  all targets. It may potentially affect the results of the code that uses this
+  function for the following targets: ``avx2-i16x16``, ``avx2-i8x32`` and all
+  ``avx512`` targets. Please, refer to `Basic Math Functions`_ for more details.
+
+Updating ISPC Programs For Changes In ISPC 1.25.0
+-------------------------------------------------
+
+The ISPC language has been extended to support the ``__attribute__(())`` syntax
+for variable and function declarations. The following attributes are now
+supported: ``noescape``, ``address_space(N)``, ``external_only``, and
+``unmangled``. The macro ``ISPC_ATTRIBUTE_SUPPORTED`` is defined if the ISPC
+compiler supports attribute syntax. Please refer to the `Attributes`_ section
+for more details and the full list of supported attributes.
+
+This release introduces support for the ``-ffunction-sections`` command-line
+flag, which generates each function in a separate section. This flag is useful
+for reducing the size of the final executable by removing unused functions.
+Please refer to the `Basic Command-line Options`_ section for more details.
+
+In some cases, such as shared libraries, the ``-ffunction-sections`` flag alone
+may not be sufficient to remove unused ISPC copies of exported functions.  To
+address this, you can use the ``external_only`` function attribute.  This
+attribute can only be applied to exported functions and instructs the compiler
+to remove the ISPC version of the function.  For more information, please refer
+to the `Attributes`_ and `Functions and Function Calls`_ sections.
+
+Template support for short vectors and array declarations has been extended.
+You can now use both type and non-type parameters to specify the type and
+dimensions of these types.
+
+For ARM targets, IEEE 754-compliant instructions (``fminnm`` and ``vminnm``) are
+now generated for min/max operations, replacing the previous use of ``fmin`` and
+``vmin``.
+
+The ``avx512knl-x16``, ``gen9-x8``, and ``gen9-x16`` targets are deprecated and
+will be removed in future releases.
+
+Updating ISPC Programs For Changes In ISPC 1.26.0
+-------------------------------------------------
+
+Macro definitions for LLVM version that ISPC is based on were added. Please,
+refer to `The Preprocessor`_ for more details.
+
+``--nocpp`` command line flag is deprecated and will be removed in future.
+
+``__attribute__((deprecated))`` can be applied to a function to mark it as
+deprecated. It leads to a warning when the function is called.
 
 
 Getting Started with ISPC
@@ -644,7 +809,7 @@ may want to examine the source code of the various examples in the
 Using The ISPC Compiler
 =======================
 
-To go from a ``ispc`` source file to an object file that can be linked
+To go from an ``ispc`` source file to an object file that can be linked
 with application code, enter the following command
 
 ::
@@ -716,8 +881,19 @@ silenced with the ``--wno-perf`` flag (or by using ``--woff``, which turns
 off all compiler warnings.)  Furthermore, ``--werror`` can be provided to
 direct the compiler to treat any warnings as errors.
 
-Position-independent code (for use in shared libraries) is generated if the
-``--pic`` command-line argument is provided.
+The ``--pic`` flag can be used to generate position-independent code suitable
+for use in a shared library. The ``--PIC`` flag can be used to generate
+position-independent code suitable for dynamic linking avoiding any limit on
+the size of the global offset table. When no ``--pic`` or ``--PIC`` flag is
+provided, the compiler enforces target-specific default behavior.
+
+The ``-ffunction-sections`` flag can be used to generate each function in a
+separate section. This flag is useful for reducing the size of the final
+executable by removing unused functions when it is combined with linker flag
+that removes unused sections: ``--gc-sections`` for ``GNU ld`` and ``/OPT:REF``
+for ``MSVC link.exe``. On macOS, this flag does not have any effect (as in
+clang) because dead stripping ``-dead_strip`` for ``ld64`` works differently.
+The ``-fno-function-sections`` disables this behavior.
 
 Selecting The Compilation Target
 --------------------------------
@@ -744,8 +920,8 @@ To compile for Intel Xe LP platform:
 
    ispc foo.ispc -o foo.bin --target=xelp-x16 --device=tgllp --emit-zebin
 
-Currently-supported architectures are ``x86``, ``x86-64``, ``xe32``,
-``xe64``, ``arm``, and ``aarch64``.
+Currently-supported architectures are ``x86``, ``x86-64``, ``xe64``,
+``arm``, and ``aarch64``.
 
 The target CPU determines both the default instruction set used as well as
 which CPU architecture the code is tuned for.  ``ispc --help`` provides a
@@ -780,15 +956,18 @@ The following target ISAs are supported:
 Target       Description
 ------------ ---------------------------------------------------------
 avx, avx1    AVX (2010-2011 era Intel CPUs)
-avx2         AVX 2 target (2013- Intel "Haswell" CPUs)
+avx2         AVX 2 target (2013- Intel codename Haswell CPUs)
 avx512knl    AVX 512 target (Xeon Phi chips codename Knights Landing)
-avx512skx    AVX 512 target (future Xeon CPUs)
+avx512skx    AVX 512 target (Skylake Xeon CPUs)
+avx512spr    AVX 512 target (Sapphire Rapids Xeon CPUs, 4th generation Xeon Scalable)
 neon         ARM NEON
 sse2         SSE2 (early 2000s era x86 CPUs)
-sse4         SSE4 (generally 2008-2010 Intel CPUs)
+sse4.1       SSE4.1 (2007 Intel codename Penryn CPUs)
+sse4.2       SSE4.2 (2008-2010 Intel codename Nehalem CPUs)
 gen9         Intel Gen9 GPU
-xehpg        Intel XeHPG GPU
 xelp         Intel XeLP GPU
+xehpg        Intel Arc GPU
+xehpc        Intel Ponte Vecchio GPU
 ============ =========================================================
 
 Consult your CPU's manual for specifics on which vector instruction set it
@@ -797,7 +976,7 @@ supports.
 The mask size may be 8, 16, 32, or 64 bits, though not all combinations of ISA
 and mask size are supported.  For best performance, the best general
 approach is to choose a mask size equal to the size of the most common
-datatype in your programs.  For example, if most of the computations are done using
+data type in your programs.  For example, if most of the computations are done using
 32-bit floating-point values, an ``i32`` target is appropriate.  However,
 if you're mostly doing computation with 8-bit data types, ``i8`` is a better choice.
 
@@ -821,11 +1000,54 @@ neon-16       n/a
 neon-32       n/a
 sse2-i32x4    sse2
 sse2-i32x8    sse2-x2
-sse4-i32x4    sse4
-sse4-i32x8    sse4-x2
-sse4-i8x16    n/a
-sse4-i16x8    n/a
+sse4.2-i32x4  sse4
+sse4.2-i32x8  sse4-x2
+sse4.2-i8x16  n/a
+sse4.2-i16x8  n/a
 ============= ===========
+
+The full list of supported targets is below.
+
+x86 targets:
+
+``sse2-i32x4``, ``sse2-i32x8``, ``sse4.1-i8x16``, ``sse4.1-i16x8``, ``sse4.1-i32x4``,
+``sse4.1-i32x8``, ``sse4.2-i8x16``, ``sse4.2-i16x8``, ``sse4.2-i32x4``, ``sse4.2-i32x8``,
+``avx1-i32x4``, ``avx1-i32x8``, ``avx1-i32x16``, ``avx1-i64x4``, ``avx2-i8x32``,
+``avx2-i16x16``, ``avx2-i32x4``, ``avx2-i32x8``, ``avx2-i32x16``, ``avx2-i64x4``,
+``avx2vnni-i32x4``, ``avx2vnni-i32x8``, ``avx2vnni-i32x16``,
+``avx512knl-x16``, ``avx512skx-x4``, ``avx512skx-x8``, ``avx512skx-x16``, ``avx512skx-x32``,
+``avx512skx-x64``, ``avx512icl-x4``, ``avx512icl-x8``, ``avx512icl-x16``, ``avx512icl-x32``,
+``avx512icl-x64``, ``avx512spr-x4``, ``avx512spr-x8``, ``avx512spr-x16``, ``avx512spr-x32``,
+``avx512spr-x64``.
+
+Neon targets:
+
+``neon-i8x16``, ``neon-i16x8``, ``neon-i32x4``, ``neon-i32x8``.
+
+The following table lists the ISPC targets and their corresponding architecture details for ARM.
+
+============================= =================
+ISPC target/arch              ARM arch
+----------------------------- -----------------
+``neon-i8x16``/``arm``        ARMv7 (32-bit)
+``neon-i8x16``/``aarch64``    N/A
+``neon-i16x8``/``arm``        ARMv7 (32-bit)
+``neon-i16x8``/``aarch64``    N/A
+``neon-i32x4``/``arm``        ARMv8-A (32-bit)
+``neon-i32x4``/``aarch64``    ARMv8-A (64-bit)
+``neon-i32x8``/``arm``        ARMv8-A (32-bit)
+``neon-i32x8``/``aarch64``    ARMv8-A (64-bit)
+============================= =================
+
+Xe targets:
+
+``gen9-x8``, ``gen9-x16``, ``xelp-x8``, ``xelp-x16``, ``xehpg-x8``, ``xehpg-x16``, ``xehpc-x16``, ``xehpc-x32``.
+
+Note that ``sse4.1`` and ``sse4.2`` targets may not be used together in
+multi-target compilation. While the auto-dispatch code will correctly detect
+the difference between these two ISAs, they both yield a binary with ``sse4``
+suffix. This limitation is to maintain backward compatibility with build
+systems expecting ``sse4`` suffix.
 
 Finally, ``--target-os`` selects the target operating system. Depending on
 your host ``ispc`` may support Windows, Linux, macOS, Android, iOS and PS4/PS5
@@ -864,8 +1086,7 @@ The Preprocessor
 
 ``ispc`` automatically runs the C preprocessor on your input program before
 compiling it.  Thus, you can use ``#ifdef``, ``#define``, and so forth in
-your ispc programs.  (This functionality can be disabled with the ``--nocpp``
-command-line argument.)
+your ispc programs.
 
 A number of preprocessor symbols are automatically defined before the
 preprocessor runs:
@@ -878,18 +1099,24 @@ preprocessor runs:
   * - ISPC
     - 1
     - Enables detecting that the ``ispc`` compiler is processing the file
-  * - ISPC_TARGET_{NEON, SSE2, SSE4, AVX, AVX2, AVX512KNL, AVX512SKX}
+  * - ISPC_TARGET_{NEON, SSE2, SSE4, AVX, AVX2, AVX512KNL, AVX512SKX, AVX512SPR}
     - 1
     - One of these will be set, depending on the compilation target
   * - ISPC_POINTER_SIZE
     - 32 or 64
     - Number of bits used to represent a pointer for the target architecture
   * - ISPC_MAJOR_VERSION
-    - 1
+    -
     - Major version of the ``ispc`` compiler/language
   * - ISPC_MINOR_VERSION
-    - 13
+    -
     - Minor version of the ``ispc`` compiler/language
+  * - LLVM_VERSION_MAJOR
+    -
+    - Major version of the LLVM compiler used by ``ispc``
+  * - LLVM_VERSION_MINOR
+    -
+    - Minor version of the LLVM compiler used by ``ispc``
   * - PI
     - 3.1415926535
     - Mathematics
@@ -902,6 +1129,9 @@ preprocessor runs:
   * - ISPC_UINT_IS_DEFINED
     - 1
     - The macro is defined if uint8/uint16/uint32/uint64 types are defined in the ``ispc`` (it's defined in 1.13.0 and later)
+  * - ISPC_ATTRIBUTE_SUPPORTED
+    - 1
+    - The macro is defined if the ``ispc`` compiler supports ``__attribute__(())`` syntax.
   * - ISPC_FP16_SUPPORTED
     - 1
     - The macro is defined if float16 type is supported by the ``ispc`` target.
@@ -912,6 +1142,21 @@ preprocessor runs:
   * - ISPC_LLVM_INTRINSICS_ENABLED
     - 1
     - The macro is defined if LLVM intrinsics support is enabled
+  * - INT8_MIN, INT16_MIN, INT32_MIN, INT64_MIN
+    -
+    - Minimum value of signed integer types of the corresponding size
+  * - INT8_MAX, INT16_MAX, INT32_MAX, INT64_MAX
+    -
+    - Maximum value of signed integer types of the corresponding size
+  * - UINT8_MAX, UINT16_MAX, UINT32_MAX, UINT64_MAX
+    -
+    - Maximum value of unsigned integer types of the corresponding size
+  * - FLT16_MIN, FLT_MIN, DBL_MIN
+    -
+    - Smallest positive normal number of the corresponding floating-point type
+  * - FLT16_MAX, FLT_MAX, DBL_MAX
+    -
+    - Largest normal number of the corresponding floating-point type
 
 ``ispc`` supports the following ``#pragma`` directives.
 
@@ -937,8 +1182,10 @@ Debugging
 The ``-g`` command-line flag can be supplied to the compiler, which causes
 it to generate debugging symbols.  The debug info is emitted in DWARF format
 on Linux\* and macOS\*.  The version of the DWARF can be controlled by
-command-line switch ``--dwarf-version={2,3,4}``.  On Windows\* CodeView format
-is used (not PDB), it's natively supported by Microsoft Visual Studio\*.
+command-line switch ``--dwarf-version={2,3,4,5}``.  On Windows\* CodeView format
+is used by default (it's natively supported by Microsoft Visual Studio\*) but
+this switch can force the generation of DWARF format that can be used, e.g.,
+together with MinGW generated code.
 Running ``ispc`` programs in the debugger, setting breakpoints, printing out
 variables is just the same as debugging C/C++ programs.  Similarly, you can
 directly step up and down the call stack between ``ispc`` code and C/C++
@@ -962,6 +1209,66 @@ to use the ``print`` statement for ``printf()`` style debugging.  (See
 `Output Functions`_ for more information.)  You can also use the ability to
 call back to application code at particular points in the program, passing
 a set of variable values to be logged or otherwise analyzed from there.
+
+
+Optimization Settings
+---------------------
+
+The ``ispc`` compiler has a number of optimization settings that can be
+controlled via command-line flags. These options can be specified using the
+`--opt=<option>` flag. Below is a list of available optimization options:
+
+Available options:
+
+- ``disable-assertions``
+
+  Remove assertion statements from the final code. This can reduce the overhead
+  of runtime checks.
+
+- ``disable-fma``
+
+  Disable the generation of 'fused multiply-add' (FMA) instructions on targets
+  that support them.
+
+- ``disable-gathers``
+
+  Disable the generation of gather instructions on targets that support them.
+
+- ``disable-loop-unroll``
+
+  Disable loop unrolling.
+
+- ``disable-scatters``
+
+  Disable the generation of scatter instructions on targets that support them.
+
+- ``disable-zmm``
+
+  Disable the use of ZMM registers for AVX512 targets in favor of YMM registers.
+  This also affects the ABI. ZMM registers are 512-bit wide, while YMM registers
+  are 256-bit wide.
+
+- ``fast-masked-vload``
+
+  Enable faster masked vector loads on SSE targets. Note that this may result in
+  memory accesses beyond the end of an array, which could cause undefined
+  behavior if not handled carefully.
+
+- ``fast-math``
+
+  Perform non-IEEE-compliant optimizations of numeric expressions. These
+  optimizations may improve performance but can result in less precise results
+  or different behavior compared to IEEE-compliant math.
+
+- ``force-aligned-memory``
+
+  Always issue "aligned" vector load and store instructions.
+
+- ``reset-ftz-daz``
+
+  Reset FTZ (Flush-to-Zero) and DAZ (Denormals-Are-Zero) flags on ISPC extern
+  function entrance and restore them on return.
+
 
 Other ways of passing arguments to ISPC
 ---------------------------------------
@@ -1003,7 +1310,7 @@ Language`_ section for details on language syntax.
 Basic Concepts: Program Instances and Gangs of Program Instances
 ----------------------------------------------------------------
 
-Upon entry to a ``ispc`` function called from C/C++ code, the execution
+Upon entry to an ``ispc`` function called from C/C++ code, the execution
 model switches from the application's serial model to ``ispc``'s execution
 model.  Conceptually, a number of ``ispc`` *program instances* start
 running concurrently.  The group of running program instances is a
@@ -1596,7 +1903,7 @@ The following reserved words from C89 are also reserved in ``ispc``:
 ``foreach_unique``, ``in``, ``inline``, ``noinline``, ``__regcall``,
 ``__vectorcall``, ``int8``, ``int16``, ``int32``, ``int64``, ``launch``,
 ``new``, ``print``, ``uint8``, ``uint16``, ``uint32``, ``uint64``, ``soa``,
-``sync``, ``task``, ``true``, ``uniform``, and ``varying``.
+``__attribute__``, ``sync``, ``task``, ``true``, ``uniform``, and ``varying``.
 
 
 Lexical Structure
@@ -1758,9 +2065,10 @@ The following identifiers are reserved as language keywords: ``bool``,
 ``goto``, ``if``, ``in``, ``inline``, ``noinline``, ``int``, ``int8``,
 ``int16``, ``int32``, ``int64``, ``invoke_sycl``, ``launch``, ``NULL``,
 ``print``, ``return``, ``signed``, ``sizeof``, ``soa``, ``static``, ``struct``,
-``switch``, ``sync``, ``task``, ``true``, ``typedef``, ``uint``, ``uint8``,
-``uint16``, ``uint32``, ``uint64``, ``uniform``, ``union``, ``unsigned``,
-``varying``, ``__regcall``, ``__vectorcall``, ``void``, ``volatile``, ``while``.
+``switch``, ``sync``, ``task``, ``template``, ``true``, ``typedef``,
+``typename``, ``uint``, ``uint8``, ``uint16``, ``uint32``, ``uint64``,
+``uniform``, ``union``, ``unsigned``, ``varying``, ``__regcall``,
+``__vectorcall``, ``__attribute__``, ``void``, ``volatile``, ``while``.
 
 ``ispc`` defines the following operators and punctuation:
 
@@ -1876,6 +2184,35 @@ qualifier can be used to define a variable or function that is only visible
 in the current scope.  The values of ``static`` variables declared in
 functions are preserved across function calls.
 
+Signed and Unsigned Integer Types
+---------------------------------
+
+Like in C and C++ signed and unsigned integer types behave differently with
+respect to overflow. Unsigned integer types have defined behavior in case of
+overflow and underflow, they are guaranteed to wraparound. I.e. maximum
+unsigned integer value plus one is guaranteed to be zero. Signed integer types
+have **undefined** behavior in case of overflow and underflow, they are **not**
+guaranteed to wraparound. This is done on purpose to enable compiler to be more
+aggressive with optimizations of signed types.
+
+There is a subtle difference with C and C++ for 8 and 16 bit integer types. In
+C and C++ binary operations require *integer promotions* for both operands,
+while ``ispc`` does not. This means that C and C++ do not have 8 and 16 bit
+arithmetic and all operations are promoted to at least to 32 bits, and hence,
+overflow and underflow do not happen for these types. If the resulting value is
+outside the 8 and 16 bit type range and it is assigned to 8 or 16 bit variable,
+the result is truncated. In ``ispc`` there are no *integer promotions* rules,
+and hence, overflow and underflow may happen for 8 and 16 bit types.
+
+Note that undefined behavior for signed integer overflow was introduced in
+``ispc`` only starting from version ``1.21.0``, which may cause compatibility
+issues. This behavior can be managed by ``--[no-]wrap-signed-int`` compiler
+switch. ``--no-wrap-signed-int`` enables undefined behavior for signed integer
+overflow / underflow and it is the default. If the old behavior (before
+``1.21.0``) needs to be preserved, use ``--wrap-signed-int``, which cause
+signed integers to have defined wraparound behavior (keep in mind that it will
+prevent some compiler optimizations).
+
 "uniform" and "varying" Qualifiers
 ----------------------------------
 
@@ -1945,9 +2282,9 @@ changing values in memory with pointers, and so forth is supported as in C.
 As with other basic types, pointers can be both ``uniform`` and
 ``varying``.
 
-** Like other types in ``ispc``, pointers are ``varying`` by default, if an
+**Like other types in ``ispc``, pointers are ``varying`` by default, if an
 explicit ``uniform`` qualifier isn't provided.  However, the default
-variability of the pointed-to type is uniform. ** This rule will be
+variability of the pointed-to type is uniform.** This rule will be
 illustrated and explained in examples below.
 
 For example, the ``ptr`` variable in the code below is a varying pointer to
@@ -1977,9 +2314,9 @@ pointer that is itself ``const`` (as opposed to pointing to a ``const``
 type) is declared in C.  (Reading the declaration from right to left gives
 its meaning: a uniform pointer to a float that is varying.)
 
-A subtlety comes in in cases like the where a uniform pointer points to a
-varying datatype.  In this case, each program instance accesses a distinct
-location in memory (because the underlying varying datatype is itself laid
+A subtlety comes in in cases like the where a ``uniform`` pointer points to a
+``varying`` data type. In this case, each program instance accesses a distinct
+location in memory (because the underlying ``varying`` data type is itself laid
 out with a separate location in memory for each program instance.)
 
 ::
@@ -2131,8 +2468,8 @@ but enumerations of different types can be explicitly cast to one other.
 Enumerators are implicitly converted to integer types, however, so they can
 be directly passed to routines that take integer parameters and can be used
 in expressions including integers, for example.  However, the integer
-result of such an expression must be explicitly cast back to the enumerant
-type if it to be assigned to a variable with the enumerant type.
+result of such an expression must be explicitly cast back to the enumerated
+type if it to be assigned to a variable with the enumerated type.
 
 ::
 
@@ -2177,29 +2514,24 @@ the brackets around the vector length:
 
     typedef float<3> float3;
 
-``ispc`` doesn't support templates in general.  In particular,
-not only must the vector length be a compile-time constant, but it's
-also not possible to write functions that are parameterized by vector
-length.
+The vector length must be a compile-time constant.
 
 ::
 
     uniform int i = foo();
-    // ERROR: length must be compile-time constant
-    float<i> vec;
-    // ERROR: can't write functions parameterized by vector length
-    float<N> func(float<N> val);
+    float<i> vec; // ERROR: length must be compile-time constant
 
 Arithmetic on these short vector types works as one would expect; the
-operation is applied component-wise to the values in the vector.  Here is a
-short example:
+operation is applied component-wise to the values in the vector. The vector
+length can be a template parameter.  Here is a short example:
 
 ::
 
-    float<3> func(float<3> a, float<3> b) {
+    template <int N>
+    float<N> func(float<N> a, float<N> b) {
         a += b;    // add individual elements of a and b
         a *= 2.;   // multiply all elements of a by 2
-        bool<3> test = a < b;  // component-wise comparison
+        bool<N> test = a < b;  // component-wise comparison
         return test ? a : b;   // return each minimum component
     }
 
@@ -2423,7 +2755,7 @@ Structure of Array Types
 
 If data can be laid out in memory so that the executing program instances
 access it via loads and stores of contiguous sections of memory, overall
-performance can be improved noticably.  One way to improve this memory
+performance can be improved noticeably.  One way to improve this memory
 access coherence is to lay out structures in "structure of arrays" (SOA)
 format in memory; the benefits from SOA layout are discussed in more detail
 in the `Use "Structure of Arrays" Layout When Possible`_ section in the
@@ -2548,6 +2880,19 @@ guarded with ``#if TARGET_WIDTH``:
         ...
     #endif
 
+However, there is a special case when the only one value is in braces. All
+vector elements are initialized with this value:
+
+::
+
+    varying int x = { 3, };
+
+It is effectively equivalent to:
+
+::
+
+    varying int x = 3;
+
 Arrays can be initialized with individual element values in braces:
 
 ::
@@ -2579,6 +2924,108 @@ the expected syntax:
     struct Foo { int x; float bar[3]; };
     Foo fa[2] = { { 1, { 2, 3, 4 } }, { 10, { 20, 30, 40 } } };
     // now, fa[1].bar[2] == 40, and so forth
+
+Variables with const qualifiers can be initialized using the values of
+previously initialized const variables including arithmetic operations above
+them:
+
+::
+
+    const uniform int x = 1;
+    const uniform int y = 1 + 2;
+    ...
+    const varying int x = { 1, 2, 3, 2 + 2 };
+    const varying int y = x * 2;
+
+
+Attributes
+----------
+
+ISPC provides GNU style attributes syntax using ``__attribute__`` keyword.
+This section contains the list of currently supported attributes.
+
+noescape
+--------
+
+``__attribute__((noescape))`` can be placed on a function parameter of a
+uniform pointer type. It informs the compiler that the pointer cannot escape,
+i.e., no reference to the object the pointer points to, derived from the
+parameter value, will survive after the function returns. Applying this
+attribute to a varying pointer type is not supported.
+
+::
+
+    uniform int *uniform global_ptr;
+
+    void nonescaping(__attribute__((noescape)) uniform int * uniform ptr) {
+        // OK, because ptr doesn't escape the function
+        *ptr = 1;
+    }
+
+    void escaping(__attribute__((noescape)) uniform int * uniform ptr) {
+        // Not OK, because ptr escapes the function
+        global_ptr = ptr;
+    }
+
+
+address_space
+-------------
+
+``__attribute__((address_space(N)))`` is Xe specific attribute that can be
+applied to a pointer type or a reference type.  The value of this type points
+to or refers to the value allocated in the provided address space.  The address
+space is a non-negative integer value, and the default address space is 0.
+ISPC doesn't support allocation of data in address spaces other than the
+default one.  Placing this attribute to a varying pointer or reference type is
+not supported.
+
+::
+
+    uniform int example(__attribute__((address_space(1))) uniform int *uniform ptr) {
+        // ptr points to value in address space 1
+        return *ptr;
+    }
+
+    // allocation of data in non-default address space is not supported
+    __attribute__((address_space(1))) uniform int x;
+
+
+unmangled
+---------
+
+``__attribute__((unmangled))`` can be applied to a function declaration to
+prevent its name from being mangled. This is useful when name mangling is not
+desired, but other qualifiers like ``export`` or ``extern`` are unsuitable due
+to the additional features they introduce.
+
+::
+
+    __attribute__((unmangled)) void foo(int a, int b);
+
+
+external_only
+----------------
+
+``__attribute__((external_only))`` can be applied to a function with
+``export`` qualifier. It informs the compiler that it should not generate an
+ISPC version of the function. This is useful for functions that are only called
+from C/C++ in case when the user wants to reduce the size of the generated
+code. Same effect can be achieved by using ``-ffunction-sections`` compiler
+option but not in all cases (e.g., shared libraries with ISPC code), so this
+attribute is provided as a more fine-grained control.
+
+deprecated
+----------
+
+``__attribute__((deprecated))`` can be applied to a function to mark it as
+deprecated. The compiler will issue a warning when the function is called.
+There are two ways to use this attribute in ISPC with or without a message:
+
+::
+
+    __attribute__((deprecated)) void foo();
+    __attribute__((deprecated("Use bar() instead."))) void foo();
+
 
 Expressions
 -----------
@@ -3209,7 +3656,12 @@ Functions that are intended to be called from C/C++ application code must
 have the ``export`` qualifier.  This causes them to have regular C linkage
 and to have their declarations included in header files, if the ``ispc``
 compiler is directed to generated a C/C++ header file for the file it
-compiled.
+compiled. By default, ISPC generates both C/C++ and ISPC versions of the
+function with ``export`` qualifier. In case when there is no calls from ISPC
+code to the ``export`` function, the ISPC version of the function is not needed
+and can be removed either by using ``-ffunction-sections`` compiler option
+together with the linker specific option that collects garbage sections or by
+using ``__attribute__((external_only))``.
 
 ::
 
@@ -3358,7 +3810,7 @@ Task Parallelism: "launch" and "sync" Statements
 
 One option for combining task-parallelism with ``ispc`` is to just use
 regular task parallelism in the C/C++ application code (be it through
-Intel® Thread Building Blocks, OpenMP or another task system), and
+Intel® oneAPI Threading Building Blocks, OpenMP or another task system), and
 for tasks to use ``ispc`` for SPMD parallelism across the vector lanes as
 appropriate.  Alternatively, ``ispc`` also has support for launching tasks
 from ``ispc`` code.  (Check the ``examples/mandelbrot_tasks`` example to
@@ -3626,6 +4078,171 @@ To detect if this feature is enabled during compile time, check if ``ISPC_LLVM_I
 macro is defined.
 
 
+Function Templates
+------------------
+
+``ispc`` supports function templates with syntax and semantics similar to C++.
+The feature is currently experimental and may change in future versions of
+``ispc``. Please report any issues or suggestions about this feature on the
+``ispc`` `bug tracker`_ or `GitHub Discussions`_.
+
+What is currently supported:
+
+* Function templates definitions with template type parameters (i.e.
+  ``template<typename T> T add(T a, T b) { return a + b;}``).
+* Calling template functions through explicit template arguments specification
+  syntax (i.e. ``add<int>(1, 2);``).
+* Template argument deduction and calling template functions through regular
+  function call syntax (i.e. ``add(1, 2);``).
+* Explicit template function instantiations (i.e.
+  ``template int add<int>(int a, int b);``).
+* Explicit template function specializations (i.e.
+  ``template<> int add<int>(int a, int b) { return a - b;}``).
+* Non-type template parameters (integral, bool and enumeration types).
+
+What is currently not supported, but is planned to be supported:
+
+* Default values for template parameters.
+* Template arguments deduction in template function specializations.
+
+While template argument deduction rules generally follow C++, there are some
+differences caused by existence of ``uniform``, ``varying`` and ``unbound``
+types in ``ispc`` type system.  The template type parameter may resolve only to
+``uniform`` and ``varying`` types, but not to ``unbound`` type. Consider the
+following example:
+
+::
+
+    template <typename T> T add(T a, T b) { return a + b; }
+
+    void foo() {
+        // Note that these two lines call the same function:
+        int i1 = add<int>(1, 2);                 // T = varying int
+        varying int i2 = add<varying int>(1, 2); // T = varying int
+
+        // And this call a uniform version:
+        uniform int i3 = add<uniform int>(1, 2); // T = uniform int
+    }
+
+The variability of template type parameter ``T`` may be overwritten by
+``uniform`` and ``varying`` keywords, so ``uniform T`` and ``varying T``  are
+always valid types. But when ``uniform T`` and ``varying T`` are used to specify
+template function parameters it has an effect on template argument deduction
+process.  If variability keyword is specified and the type was successfully
+deduced, the default variability of type ``T`` is assumed to be the opposite of
+the variability keyword.  The logic behind it is that the keyword was specified
+"on purpose" to changed the variability of the type ``T``. Consider the
+following example:
+
+::
+
+    template <typename T> void foo1(T t);
+    template <typename T> void foo2(uniform T t);
+    template <typename T> void foo3(varying T t);
+
+    void bar() {
+        uniform int ui;
+        varying int vi;
+        foo1(ui); // T is uniform int
+        foo1(vi); // T is varying int
+        foo2(ui); // T is varying int!
+        foo2(vi); // error: varying type cannot be passed to uniform parameter
+        foo3(ui); // T is uniform int!
+        foo3(vi); // T is uniform int!
+    }
+
+Note, to get the insight of the results of template argument deduction, it might
+be useful to specify ``--ast-dump`` flag to ``ispc`` compiler.
+
+ISPC supports template function specializations that can be used to provide alternative
+implementations for a specific set of template parameters. To define template function
+specialization, the primary template should be already present in the program. If specialization
+is defined after it was used, the error will be issued. Template arguments deduction in
+template function specializations is not yet supported. Consider the following example:
+
+::
+
+    // primary template
+    template <typename T> int goo(T a1, T a2) {
+      return a1 + a2;
+    }
+
+    // declaration of specialization for int type
+    template <> int goo<int>(int a1, int a2);
+
+    // error: no matching function template found for specialization.
+    template <> int goo<float, int>(float a1, int a2) {
+      return a1 + a2;
+    }
+
+    // error: template arguments deduction is not yet supported in template function specialization.
+    template <> int goo(float a1, float a2) {
+      return a1 + a2;
+    }
+
+    float foo(int a1, float a2) {
+      float a = goo<int>(a1, (int)a2); //specialization for int type will be called
+      double b = goo<double>((double)a1, (double)a2); //primary template will be instantiated for double type
+      return a + b;
+    }
+
+    // definition of specialization for int type
+    template <> int goo<int>(int a1, int a2) {
+      return a1 * a2;
+    }
+
+    // error: template function specialization was already defined
+    template <> int goo<int>(int a1, int a2) {
+      return a1 * a2;
+    }
+
+For non-type template parameters, the following rules apply:
+
+* Uniform integral (including bool) types and enum types can be used as non-type template parameters. Unbound types are treated as uniform.
+  For example:
+
+  ::
+
+      template <int N> int foo(int a) { // N is uniform int
+        return a * N;
+      }
+
+      int bar() {
+        return foo<2>(3); // returns 6
+      }
+
+      enum AB { A = 1, B = 2 };
+      template <AB ab> int baz(int a) {
+        return a * ab;
+      }
+
+      int qux() {
+        return baz<B>(3); // returns 6
+      }
+
+* Varying types are not allowed.
+* Integral constants, enumeration constants and template parameters (in the context of the nested templates)
+  can be used as non-type template arguments. Constant expressions are not allowed.
+* Partial specialization of function templates with non-type template parameters is not allowed.
+
+
+You can use limited number of function specifiers with function templates:
+
+* The keywords ``export``, ``task``, ``typedef``, ``extern "C"`` and ``extern "SYCL"``
+  are not allowed.
+* Calling conventions such as ``__vectorcall`` and ``__regcall`` must be used in conjunction
+  with ``extern "C"`` or ``extern "SYCL"``, so they are not allowed as well.
+* Performance hints like ``inline`` and ``noinline`` are allowed. Primary template, template
+  specializations and explicit instantiations may have different ``inline`` hints.
+* Storage types ``extern`` and ``static`` are allowed. Template specializations and explicit
+  instantiations must share the same storage type as the primary template.
+  If not specified, the storage type will be inherited from the primary template.
+* ``unmasked`` specifier is allowed. Template specializations and explicit instantiations
+  must maintain consistency with the primary template regarding the ``unmasked`` specifier.
+  You cannot specify ``unmasked`` for a template specialization if it was not previously
+  specified for the primary template. If unspecified, it will be inherited from the
+  primary template.
+
 The ISPC Standard Library
 =========================
 
@@ -3825,9 +4442,16 @@ is on (i.e. the value is negative) and zero if it is off.
     unsigned int64 signbits(double x)
     uniform unsigned int64 signbits(uniform double x)
 
-Standard rounding functions are provided for ``float16``, ``float`` and ``double``
-types.  (On machines that support Intel®SSE or Intel® AVX, these functions all
-map to variants of the ``roundss`` and ``roundps`` instructions, respectively.)
+The standard library provides four rounding functions: ``round``, ``floor``,
+``ceil`` and ``trunc`` for ``float16``, ``float`` and ``double`` data types. On
+machines that support Intel®SSE or Intel® AVX, these functions all map to a
+single instruction, specifically a variant of the ``roundss`` and ``roundps``
+instructions. This offers enhanced performance, despite a minor semantic
+difference in the ``round`` function when compared to the ``C`` math library
+``round`` function. It computes the nearest integer value, rounding halfway
+cases to nearest even integer, i.e., corresponds to the ``C`` math library
+``roundeven`` function. These function operate regardless of the current
+rounding mode and do not signal precision exceptions.
 
 ::
 
@@ -3849,13 +4473,25 @@ different on different architectures.
     float rcp(float v)
     uniform float rcp(uniform float v)
 
-ispc also provides a version of ``rcp()`` for float with less precision which doesn't
+ISPC also provides a version of ``rcp()`` for float with less precision which doesn't
 use Newton-Raphson.
 
 ::
 
     float rcp_fast(float v)
     uniform float rcp_fast(uniform float v)
+
+The ``fmod()`` functions compute the floating-point remainder of the division
+operation x/y. It's semantics is equivalent to C/C++ lib functions.
+
+::
+
+    float16 fmod(float16 x, float16 y)
+    uniform float16 fmod(uniform float16 x, uniform float16 y)
+    float fmod(float x, float y)
+    uniform float fmod(uniform float x, uniform float y)
+    double fmod(double x, double y)
+    uniform double fmod(uniform double x, uniform double y)
 
 A standard set of minimum and maximum functions is available for all ispc
 standard types.  These functions also map to corresponding intrinsic functions.
@@ -3942,7 +4578,7 @@ architectures.
     float rsqrt(float v)
     uniform float rsqrt(uniform float v)
 
-ispc also provides a version of ``rsqrt()`` for float with less precision which doesn't
+ISPC also provides a version of ``rsqrt()`` for float with less precision which doesn't
 use Newton-Raphson.
 
 ::
@@ -4016,7 +4652,7 @@ All transcendental functions are provided for ``float16``, ``float`` and
 
 Saturating Arithmetic
 ---------------------
-A saturation (no overflow possible) addition, substraction, multiplication and
+A saturation (no overflow possible) addition, subtraction, multiplication and
 division of all integer types are provided by the ``ispc`` standard library.
 
 ::
@@ -4047,6 +4683,83 @@ above, there are versions that supports ``int16``, ``int32`` and ``int64``
 values as well.
 
 
+Dot product
+-----------
+
+ISPC supports dot product operations for both unsigned and signed int8 and int16 data types, 
+utilizing the AVX-VNNI, AVX512-VNNI, and AARCH64 instruction sets. The ISPC targets that
+include native dot product instruction support are ``avx2vnni-i32x*``, ``avx512icl-i32x*``,
+and ``avx512spr-i32x*`` on x86, as well as ``neon-i32x*`` on ARM hardware with native dot
+product capabilities.
+
+Please note that not all combinations of signed and unsigned data types are supported on these
+targets. For instance, some versions of ARMv8 natively supports only signed/signed and
+unsigned/unsigned int8 dot product operations, while AVX2VNNI and AVX512 provide support solely for
+mixed-sign int8 operations.
+
+If the selected target or platform lacks native dot product support, these operations are emulated.
+
+These dot product operations are specifically designed to operate on *packed* input vectors,
+necessitating proper packing or casting of input vectors by the programmer before use. For example:
+
+::
+
+    uniform uint8 a[4] = {1, 2, 3, 4};
+    uniform int8 b[4] = {4, 3, 2, 1};
+    int accumulator = 1;
+    int result = dot4add_u8i8packed(*((uniform uint*)&a[0]), *((uniform uint*)&b[0]), accumulator);
+
+
+For 8-bit Integer Vectors:
+
+The functions below multiply groups of four unsigned 8-bit integers packed in ``a`` with corresponding
+four signed 8-bit integers packed in ``b``, resulting in four intermediate signed 16-bit values.
+The sum of these values, in combination with the ``acc`` accumulator, is then returned as the final result.
+
+::
+
+    varying int32 dot4add_u8i8packed(varying uint32 a, varying uint32 b,
+                                     varying int32 acc)
+    varying int32 dot4add_u8i8packed_sat(varying uint32 a, varying uint32 b,
+                                         varying int32 acc) // saturate the result
+
+The functions below multiply groups of four unsigned 8-bit integers packed in ``a`` with corresponding
+four unsigned 8-bit integers packed in ``b``, resulting in four intermediate signed 16-bit values.
+The sum of these values, in combination with the ``acc`` accumulator, is then returned as the final result.
+
+::
+
+    varying uint32 dot4add_u8u8packed(varying uint32 a, varying uint32 b,
+                                     varying uint32 acc)
+    varying uint32 dot4add_u8u8packed_sat(varying uint32 a, varying uint32 b,
+                                         varying uint32 acc) // saturate the result
+
+The functions below multiply groups of four signed 8-bit integers packed in ``a`` with corresponding
+four signed 8-bit integers packed in ``b``, resulting in four intermediate signed 16-bit values.
+The sum of these values, in combination with the ``acc`` accumulator, is then returned as the final result.
+
+::
+
+    varying int32 dot4add_i8i8packed(varying uint32 a, varying uint32 b,
+                                     varying int32 acc)
+    varying int32 dot4add_i8i8packed_sat(varying uint32 a, varying uint32 b,
+                                         varying int32 acc) // saturate the result
+
+
+For 16-bit Integer Vectors:
+
+The functions multiply groups of two signed 16-bit integers packed in ``a`` with corresponding
+two signed 16-bit integers packed in ``b``, yielding two intermediate signed 32-bit results.
+The sum of these results, combined with the ``acc`` accumulator, is then returned as the final result.
+
+::
+
+    varying int32 dot2add_i16packed(varying uint32 a, varying uint32 b,
+                                    varying int32 acc)
+    varying int32 dot2add_i16packed_sat(varying uint32 a, varying uint32 b,
+                                        varying int32 acc) // saturate the result
+
+
 Pseudo-Random Numbers
 ---------------------
 
@@ -4063,7 +4776,7 @@ library.  State for the RNG is maintained in an instance of the
 Note that if the same ``varying`` seed value is used for all of the program
 instances (e.g. ``RNGState state; seed_rng(&state, 1);``), then all of the
 program instances in the gang will see the same sequence of pseudo-random
-numbers.  If this behavior isn't desred, you may want to add the
+numbers.  If this behavior isn't desired, you may want to add the
 ``programIndex`` value to the provided seed or otherwise ensure that the
 seed has a unique value for each program instance.
 
@@ -4297,7 +5010,7 @@ set if the i'th program instance lane is currently active.
 
 ::
 
-    uniform int lanemask()
+    uniform unsigned int64 lanemask()
 
 To broadcast a value from one program instance to all of the others, a
 ``broadcast()`` function is available.  It broadcasts the value of the
@@ -4467,7 +5180,7 @@ across all of the currently-executing program instances.
     uniform float reduce_min(float a)
     uniform double reduce_min(double a)
 
-Equivalent functions are available to comptue the maximum of the given
+Equivalent functions are available to compute the maximum of the given
 varying variable over the active program instances.
 
 ::
@@ -4589,8 +5302,8 @@ Setting and Copying Values In Memory
 
 There are a few functions for copying blocks of memory and initializing
 values in memory.  Along the lines of the equivalently-named routines in
-the C Standard libary, ``memcpy`` copies a given number of bytes starting
-from a source location in memory to a destination locaiton, where the two
+the C Standard library, ``memcpy`` copies a given number of bytes starting
+from a source location in memory to a destination location, where the two
 regions of memory are guaranteed by the caller to be non-overlapping.
 Alternatively, ``memmove`` can be used to copy data if the buffers may
 overlap.
@@ -5038,23 +5751,16 @@ There are also ``int64`` equivalents as well as variants that take
   int32 atomic_swap_{local,global}(uniform int32 * uniform ptr, int32 value)
 
 Support for ``float`` and ``double`` types is also available.  For local
-atomics, all but the logical operations are available.  (There are
+and global atomics, all but the logical operations are available.  (There are
 corresponding ``double`` variants of these, not listed here.)
 
 ::
 
-  float atomic_add_local(uniform float * uniform ptr, float value)
-  float atomic_subtract_local(uniform float * uniform ptr, float value)
-  float atomic_min_local(uniform float * uniform ptr, float value)
-  float atomic_max_local(uniform float * uniform ptr, float value)
-  float atomic_swap_local(uniform float * uniform ptr, float value)
-
-For global atomics, only atomic swap is available for these types:
-
-::
-
-  float atomic_swap_global(uniform float * uniform ptr, float value)
-  double atomic_swap_global(uniform double * uniform ptr, double value)
+  float atomic_add_{local,global}(uniform float * uniform ptr, float value)
+  float atomic_subtract_{local,global}(uniform float * uniform ptr, float value)
+  float atomic_min_{local,global}(uniform float * uniform ptr, float value)
+  float atomic_max_{local,global}(uniform float * uniform ptr, float value)
+  float atomic_swap_{local,global}(uniform float * uniform ptr, float value)
 
 Finally, "swap" (but none of these other atomics) is available for pointer
 types:
@@ -5316,7 +6022,7 @@ And this C++ code:
 
 Both the ``foo`` and ``bar`` global variables can be accessed on each
 side.  Note that the ``extern "C"`` declaration is necessary from C++,
-since ``ispc`` uses C linkage for functions and globals.
+since ``ispc`` uses C linkage for functions and global variables.
 
 ``ispc`` code can also call back to C/C++.  On the ``ispc`` side, any
 application functions to be called must be declared with the ``extern "C"``
@@ -5447,7 +6153,7 @@ Data Layout
 -----------
 
 In general, ``ispc`` tries to ensure that ``struct`` types and other
-complex datatypes are laid out in the same way in memory as they are in
+complex data types are laid out in the same way in memory as they are in
 C/C++.  Matching structure layout is important for easy interoperability
 between C/C++ code and ``ispc`` code.
 
@@ -5478,7 +6184,7 @@ have a declaration like:
   };
 
 Because ``varying`` types have size that depends on the size of the gang of
-program instances, ``ispc`` has restrictrictions on using varying types in
+program instances, ``ispc`` has restrictions on using varying types in
 parameters to functions with the ``export`` qualifier.  ``ispc`` prohibits
 parameters to exported functions to have varying type unless the parameter is
 of pointer type.  (That is, ``varying float`` isn't allowed, but ``varying float * uniform``
@@ -5519,7 +6225,7 @@ the generated header file will have a definition like (for 8-wide SIMD):
 
 In the case of multiple target compilation, ``ispc`` will generate multiple
 header files and a "general" header file with definitions for multiple sizes.
-Any pointers to varyings in exported functions will be rewritten as ``void *``.
+Any pointers to varying variables in exported functions will be rewritten as ``void *``.
 At runtime, the ``ispc`` dispatch mechanism will cast these pointers to the appropriate
 types.  Programmers can
 provide C/C++ code with a mechanism to determine the gang width used
@@ -5546,7 +6252,7 @@ passing pointers from the application to ``ispc`` programs.
 The first is that it is required that it be valid to read memory at the
 first element of any array that is passed to ``ispc``.  In practice, this
 should just happen naturally, but it does mean that it is illegal to pass a
-``NULL`` pointer as a parameter to a ``ispc`` function called from the
+``NULL`` pointer as a parameter to an ``ispc`` function called from the
 application.
 
 The second constraint is that pointers and references in ``ispc`` programs

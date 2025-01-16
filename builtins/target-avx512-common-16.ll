@@ -1,39 +1,71 @@
-;;  Copyright (c) 2015-2022, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2015-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 define(`MASK',`i1')
 define(`HAVE_GATHER',`1')
 define(`HAVE_SCATTER',`1')
 
 include(`target-avx512-utils.ll')
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; shuffles
+
+;; Implementation for i8 and i16 types is different across avx512 targets.
+;; There is no @llvm.x86.avx512.mask.permvar.qi.128 and @llvm.x86.avx512.vpermi2var.qi.128
+;; before icl. 
+;; @llvm.x86.avx512.vpermi2var.hi.256 is not available for KNL.
+;; Look for definitions in particular target files.
+
+shuffle1(half)
+shuffle1(double)
+shuffle1(i64)
+
+declare <WIDTH x i32> @llvm.x86.avx512.permvar.si.512(<WIDTH x i32>, <WIDTH x i32>)
+define <WIDTH x i32> @__shuffle_i32(<WIDTH x i32>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %res = call <WIDTH x i32>@llvm.x86.avx512.permvar.si.512(<WIDTH x i32> %0, <WIDTH x i32> %1)
+  ret <WIDTH x i32> %res
+}
+
+declare <WIDTH x float> @llvm.x86.avx512.permvar.sf.512(<WIDTH x float>, <WIDTH x i32>)
+define <WIDTH x float> @__shuffle_float(<WIDTH x float>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %res = call <WIDTH x float> @llvm.x86.avx512.permvar.sf.512(<WIDTH x float> %0, <WIDTH x i32> %1)
+  ret <WIDTH x float> %res
+}
+
+define_shuffle2_const()
+
+shuffle2(half)
+shuffle2(i64)
+shuffle2(double)
+
+declare <WIDTH x i32> @llvm.x86.avx512.vpermi2var.d.512(<WIDTH x i32>, <WIDTH x i32>, <WIDTH x i32>)
+define <WIDTH x i32> @__shuffle2_i32(<WIDTH x i32>, <WIDTH x i32>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<WIDTH x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <WIDTH x i32> @__shuffle2_const_i32(<WIDTH x i32> %0, <WIDTH x i32> %1, <WIDTH x i32> %2)
+  ret <WIDTH x i32> %res_const
+
+not_const:
+  %res = call <WIDTH x i32> @llvm.x86.avx512.vpermi2var.d.512(<WIDTH x i32> %0, <WIDTH x i32> %2, <WIDTH x i32> %1)
+  ret <WIDTH x i32> %res
+}
+
+declare <WIDTH x float> @llvm.x86.avx512.vpermi2var.ps.512(<WIDTH x float>, <WIDTH x i32>, <WIDTH x float>)
+define <WIDTH x float> @__shuffle2_float(<WIDTH x float>, <WIDTH x float>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<WIDTH x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <WIDTH x float> @__shuffle2_const_float(<WIDTH x float> %0, <WIDTH x float> %1, <WIDTH x i32> %2)
+  ret <WIDTH x float> %res_const
+
+not_const:
+  %res = call <WIDTH x float> @llvm.x86.avx512.vpermi2var.ps.512(<WIDTH x float> %0, <WIDTH x i32> %2, <WIDTH x float> %1)
+  ret <WIDTH x float> %res
+}
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stub for mask conversion. LLVM's intrinsics want i1 mask, but we use i8
@@ -92,12 +124,12 @@ define <16 x i16> @__float_to_half_varying(<16 x float> %v) nounwind readnone {
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; rounding floats
 
-declare <16 x float> @llvm.nearbyint.v16f32(<16 x float> %p)
+declare <16 x float> @llvm.roundeven.v16f32(<16 x float> %p)
 declare <16 x float> @llvm.floor.v16f32(<16 x float> %p)
 declare <16 x float> @llvm.ceil.v16f32(<16 x float> %p)
 
 define <16 x float> @__round_varying_float(<16 x float>) nounwind readonly alwaysinline {
-  %res = call <16 x float> @llvm.nearbyint.v16f32(<16 x float> %0)
+  %res = call <16 x float> @llvm.roundeven.v16f32(<16 x float> %0)
   ret <16 x float> %res
 }
 
@@ -114,15 +146,15 @@ define <16 x float> @__ceil_varying_float(<16 x float>) nounwind readonly always
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; rounding doubles
 
-declare <8 x double> @llvm.nearbyint.v8f64(<8 x double> %p)
+declare <8 x double> @llvm.roundeven.v8f64(<8 x double> %p)
 declare <8 x double> @llvm.floor.v8f64(<8 x double> %p)
 declare <8 x double> @llvm.ceil.v8f64(<8 x double> %p)
 
 define <16 x double> @__round_varying_double(<16 x double>) nounwind readonly alwaysinline {
   %v0 = shufflevector <16 x double> %0, <16 x double> undef, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
   %v1 = shufflevector <16 x double> %0, <16 x double> undef, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
-  %r0 = call <8 x double> @llvm.nearbyint.v8f64(<8 x double> %v0)
-  %r1 = call <8 x double> @llvm.nearbyint.v8f64(<8 x double> %v1)
+  %r0 = call <8 x double> @llvm.roundeven.v8f64(<8 x double> %v0)
+  %r1 = call <8 x double> @llvm.roundeven.v8f64(<8 x double> %v1)
   %res = shufflevector <8 x double> %r0, <8 x double> %r1, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7,
                                                                        i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
   ret <16 x double> %res
@@ -713,12 +745,21 @@ define void @__masked_store_blend_double(<16 x double>* nocapture,
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; gather/scatter
 
+;; We need factored generic implementations when --opt=disable-gathers is used.
+;; The util functions for gathers already include factored implementations,
+;; so use factored ones here explicitely for remaining types only.
+
 ;; gather - i8
 gen_gather(i8)
 
 ;; gather - i16
 gen_gather(i16)
 gen_gather(half)
+
+gen_gather_factored_generic(i32)
+gen_gather_factored_generic(float)
+gen_gather_factored_generic(i64)
+gen_gather_factored_generic(double)
 
 ;; gather - i32
 declare <16 x i32> @llvm.x86.avx512.mask.gather.dpi.512(<16 x i32>, i8*, <16 x i32>, <16 x i1>, i32)
@@ -881,6 +922,10 @@ define void @__scatter_base_offsets64_$1(i8* %ptr, i32 %scale, <WIDTH x i64> %of
 }
 ')
 
+;; We need factored generic implementations when --opt=disable-scatters is used.
+;; The util functions for scatters already include factored implementations,
+;; so use factored ones here explicitely for remaining types only.
+
 ;; scatter - i8
 scatterbo32_64(i8)
 gen_scatter(i8)
@@ -892,6 +937,11 @@ gen_scatter(i16)
 ;; scatter - half
 scatterbo32_64(half)
 gen_scatter(half)
+
+gen_scatter_factored(i32)
+gen_scatter_factored(float)
+gen_scatter_factored(i64)
+gen_scatter_factored(double)
 
 ;; scatter - i32
 declare void @llvm.x86.avx512.mask.scatter.dpi.512 (i8*, <16 x i1>, <16 x i32>, <16 x i32>, i32)
@@ -1057,73 +1107,8 @@ define_prefetches()
 
 define_avgs()
 
-;; Transcendentals
-
-;; exponent
-define(`F144', `0x3FF7154760000000') ;; F144 = log(2, e)
-define(`D144', `0x3FF71547652B82FE') ;; D144 = log(2, e)
-
-declare <16 x float> @llvm.x86.avx512.exp2.ps(<16 x float>, <16 x float>, i16, i32) nounwind readnone
-declare <8 x double> @llvm.x86.avx512.exp2.pd(<8 x double>, <8 x double>, i8, i32) nounwind readnone
-declare <16 x float> @llvm.x86.avx512.mask.mul.ps.512(<16 x float>, <16 x float>, <16 x float>, i16, i32)
-declare <8 x double> @llvm.x86.avx512.mask.mul.pd.512(<8 x double>, <8 x double>, <8 x double>, i8, i32)
-
-define float @__exp_uniform_float(float %a) nounwind readnone alwaysinline {
-  %res = call float @__stdlib_expf(float %a)
-  ret float %res;
-}
-
-define double @__exp_uniform_double(double %a) nounwind readnone alwaysinline {
-  %res = call double @__stdlib_exp(double %a)
-  ret double %res;
-}
-
-define <16 x float> @__exp_varying_float(<16 x float> %a) nounwind readnone alwaysinline {
-  %a0 = call <16 x float> @llvm.x86.avx512.mask.mul.ps.512(<16 x float> <float F144, float F144, float F144, float F144,
-        float F144, float F144, float F144, float F144, float F144, float F144, float F144, float F144,
-        float F144, float F144, float F144, float F144>, <16 x float> %a, <16 x float> zeroinitializer, i16 -1, i32 0)
-  %res = call <16 x float> @llvm.x86.avx512.exp2.ps(<16 x float> %a0, <16 x float> zeroinitializer, i16 -1, i32 8)
-  ret <16 x float> %res
-}
-
-define <16 x double> @__exp_varying_double(<16 x double> %a) nounwind readnone alwaysinline {
-  %alo = shufflevector <16 x double> %a, <16 x double> undef, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
-  %ahi = shufflevector <16 x double> %a, <16 x double> undef, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15> 
-  %alo0 = call <8 x double> @llvm.x86.avx512.mask.mul.pd.512(<8 x double> <double D144, double D144, double D144, 
-          double D144, double D144, double D144, double D144, double D144>, <8 x double> %alo, <8 x double> zeroinitializer, i8 -1, i32 0)
-  %ahi0 = call <8 x double> @llvm.x86.avx512.mask.mul.pd.512(<8 x double> <double D144, double D144, double D144, 
-          double D144, double D144, double D144, double D144, double D144>, <8 x double> %ahi, <8 x double> zeroinitializer, i8 -1, i32 0)
-  %res_lo = call <8 x double> @llvm.x86.avx512.exp2.pd(<8 x double> %alo0, <8 x double> zeroinitializer, i8 -1, i32 8)
-  %res_hi = call <8 x double> @llvm.x86.avx512.exp2.pd(<8 x double> %ahi0, <8 x double> zeroinitializer, i8 -1, i32 8)
-  %res = shufflevector <8 x double> %res_lo, <8 x double> %res_hi, <16 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7, i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15> 
-  ret <16 x double> %res
-}
-
-;; power
-define float @__pow_uniform_float(float %a, float %b) nounwind readnone alwaysinline {
-  %res = call float @__stdlib_powf(float %a, float %b)
-  ret float %res;
-}
-
-define double @__pow_uniform_double(double %a, double %b) nounwind readnone alwaysinline {
-  %res = call double @__stdlib_pow(double %a, double %b)
-  ret double %res;
-}
-
-declare <16 x float> @__pow_varying_float(<16 x float> %a, <16 x float> %b) nounwind readnone alwaysinline
-
-;;define <16 x float> @__pow_varying_float(<16 x float> %a, <16 x float> %b) nounwind readnone alwaysinline
-;;  ret <16 x float> %a
-;;}
-
-declare <16 x double> @__pow_varying_double(<16 x double> %a, <16 x double> %b) nounwind readnone alwaysinline
-
-
-;; log
-declare float @__log_uniform_float(float %a) nounwind readnone alwaysinline
-declare double @__log_uniform_double(double %a) nounwind readnone alwaysinline
-declare <16 x float> @__log_varying_float(<16 x float> %a) nounwind readnone alwaysinline
-declare <16 x double> @__log_varying_double(<16 x double> %a) nounwind readnone alwaysinline
+;; Transcendentals are not defined because target definitions for all avx512
+;; targets has false for m_hasTranscendentals. This means that no real use of
+;; these functions happens in stdlib.ispc.
 
 ;; Trigonometry
-trigonometry_decl()

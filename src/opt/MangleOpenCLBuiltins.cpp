@@ -1,68 +1,49 @@
 /*
-  Copyright (c) 2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2022-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 #include "MangleOpenCLBuiltins.h"
 
 #ifdef ISPC_XE_ENABLED
+#include "llvm/IR/TypedPointerType.h"
 
 namespace ispc {
 
-char MangleOpenCLBuiltins::ID = 0;
-
 static std::string mangleMathOCLBuiltin(const llvm::Function &func) {
-    Assert(func.getName().startswith("__spirv_ocl") && "wrong argument: ocl builtin is expected");
+    Assert(func.getName().starts_with("__spirv_ocl") && "wrong argument: ocl builtin is expected");
     std::string mangledName;
     llvm::Type *retType = func.getReturnType();
+    // spirv OpenCL builtins are used for half/float/double types only
+    llvm::Type *retElementType = (retType->isVectorTy() && llvm::isa<llvm::FixedVectorType>(retType))
+                                     ? llvm::dyn_cast<llvm::FixedVectorType>(retType)->getElementType()
+                                     : retType;
+    Assert(retElementType->isHalfTy() || retElementType->isFloatTy() || retElementType->isDoubleTy());
+
     std::string funcName = func.getName().str();
     std::vector<llvm::Type *> ArgTy;
-    // spirv OpenCL builtins are used for double types only
-    Assert(retType->isVectorTy() && llvm::dyn_cast<llvm::FixedVectorType>(retType)->getElementType()->isDoubleTy() ||
-           retType->isSingleValueType() && retType->isDoubleTy());
-    if (retType->isVectorTy() && llvm::dyn_cast<llvm::FixedVectorType>(retType)->getElementType()->isDoubleTy()) {
-        // Get vector width from retType. Required width may be different from target width
-        // for example for 32-width targets
-        ArgTy.push_back(llvm::FixedVectorType::get(LLVMTypes::DoubleType,
-                                                   llvm::dyn_cast<llvm::FixedVectorType>(retType)->getNumElements()));
-        // _DvWIDTH suffix is used in target file to differentiate scalar
-        // and vector versions of intrinsics. Here we remove this
-        // suffix and mangle the name.
-        size_t pos = funcName.find("_DvWIDTH");
-        if (pos != std::string::npos) {
-            funcName.erase(pos, 8);
-        }
-    } else if (retType->isSingleValueType() && retType->isDoubleTy()) {
-        ArgTy.push_back(LLVMTypes::DoubleType);
+    // _DvWIDTH suffix is used in target file to differentiate scalar (DvWIDTH1<type>)
+    // and vector (DvWIDTH<type>) versions of intrinsics for different types. Here we remove this
+    // suffix and mangle the name.
+    // We don't use mangled names in target file for 2 reasons:
+    // 1. target file is used for different vector widths
+    // 2. spirv builtins may be used as part of macros (e.g. see xe_double_math)
+    size_t pos = funcName.find("_DvWIDTH");
+    bool suffixPos = pos != std::string::npos;
+    if (suffixPos) {
+        funcName.erase(pos, funcName.length() - pos);
     }
+    for (auto &arg : func.args()) {
+        if (arg.getType()->isPointerTy()) {
+            // In SPIR-V OpenCL builtins it's safe to assume that pointer argument is either pointer to <type>
+            // or pointer to <WIDTH x type> which is basically type of retType.
+            ArgTy.push_back(llvm::TypedPointerType::get(retType, 0));
+        } else {
+            ArgTy.push_back(arg.getType());
+        }
+    }
+
     mangleOpenClBuiltin(funcName, ArgTy, mangledName);
     return mangledName;
 }
@@ -75,16 +56,20 @@ static std::string manglePrintfOCLBuiltin(const llvm::Function &func) {
 }
 
 static std::string mangleOCLBuiltin(const llvm::Function &func) {
-    Assert(func.getName().startswith("__spirv_ocl") && "wrong argument: ocl builtin is expected");
+    Assert(func.getName().starts_with("__spirv_ocl") && "wrong argument: ocl builtin is expected");
     if (func.getName() == "__spirv_ocl_printf")
         return manglePrintfOCLBuiltin(func);
     return mangleMathOCLBuiltin(func);
 }
 
-static std::string mangleSPIRVBuiltin(const llvm::Function &func) {
-    Assert(func.getName().startswith("__spirv_") && "wrong argument: spirv builtin is expected");
+std::string mangleSPIRVBuiltin(const llvm::Function &func) {
+    Assert(func.getName().starts_with("__spirv_") && "wrong argument: spirv builtin is expected");
     std::string mangledName;
-    mangleOpenClBuiltin(func.getName().str(), func.getArg(0)->getType(), mangledName);
+    std::vector<llvm::Type *> tyArgs;
+    for (const auto &arg : func.args()) {
+        tyArgs.push_back(arg.getType());
+    }
+    mangleOpenClBuiltin(func.getName().str(), tyArgs, mangledName);
     return mangledName;
 }
 
@@ -95,11 +80,11 @@ bool MangleOpenCLBuiltins::mangleOpenCLBuiltins(llvm::BasicBlock &bb) {
         llvm::Instruction *inst = &*I;
         if (llvm::CallInst *ci = llvm::dyn_cast<llvm::CallInst>(inst)) {
             llvm::Function *func = ci->getCalledFunction();
-            if (func == NULL)
+            if (func == nullptr)
                 continue;
-            if (func->getName().startswith("__spirv_")) {
+            if (func->getName().starts_with("__spirv_")) {
                 std::string mangledName;
-                if (func->getName().startswith("__spirv_ocl")) {
+                if (func->getName().starts_with("__spirv_ocl")) {
                     mangledName = mangleOCLBuiltin(*func);
                 } else {
                     mangledName = mangleSPIRVBuiltin(*func);
@@ -114,16 +99,13 @@ bool MangleOpenCLBuiltins::mangleOpenCLBuiltins(llvm::BasicBlock &bb) {
     return modifiedAny;
 }
 
-bool MangleOpenCLBuiltins::runOnFunction(llvm::Function &F) {
-    llvm::TimeTraceScope FuncScope("MangleOpenCLBuiltins::runOnFunction", F.getName());
-    bool modifiedAny = false;
+llvm::PreservedAnalyses MangleOpenCLBuiltins::run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
+    llvm::TimeTraceScope FuncScope("MangleOpenCLBuiltins::run", F.getName());
     for (llvm::BasicBlock &BB : F) {
-        modifiedAny |= mangleOpenCLBuiltins(BB);
+        mangleOpenCLBuiltins(BB);
     }
-    return modifiedAny;
+    return llvm::PreservedAnalyses::all();
 }
-
-llvm::Pass *CreateMangleOpenCLBuiltins() { return new MangleOpenCLBuiltins(); }
 
 } // namespace ispc
 

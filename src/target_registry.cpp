@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2019-2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2019-2025, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file target_registry.h
@@ -39,6 +12,7 @@
 #include "util.h"
 
 #include <numeric>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -75,7 +49,7 @@ class Triple {
         m_arch = (Arch)((encoding & arch_mask) >> (target_width + os_width));
     };
 
-    Triple(ISPCTarget target, TargetOS os, Arch arch) : m_target(target), m_os(os), m_arch(arch){};
+    Triple(ISPCTarget target, TargetOS os, Arch arch) : m_target(target), m_os(os), m_arch(arch) {};
 
     uint32_t encode() const {
         uint32_t result = (uint32_t)m_arch;
@@ -90,8 +64,8 @@ std::vector<const BitcodeLib *> *TargetLibRegistry::libs = nullptr;
 TargetLibRegistry::TargetLibRegistry() {
     // TODO: sort before adding - to canonicalize.
     // TODO: check for conflicts / duplicates.
-    m_dispatch = NULL;
-    m_dispatch_macos = NULL;
+    m_dispatch = nullptr;
+    m_dispatch_macos = nullptr;
     for (auto lib : *libs) {
         switch (lib->getType()) {
         case BitcodeLib::BitcodeLibType::Dispatch:
@@ -125,7 +99,18 @@ TargetLibRegistry::TargetLibRegistry() {
             }
             // PS5 is an alias to PS4 in terms of target files. All the tuning is done through CPU flags.
             if (lib->getOS() == TargetOS::ps4) {
-                m_builtins[Triple(lib->getISPCTarget(), TargetOS::ps5, lib->getArch()).encode()] = lib;
+                m_targets[Triple(lib->getISPCTarget(), TargetOS::ps5, lib->getArch()).encode()] = lib;
+            }
+            break;
+        case BitcodeLib::BitcodeLibType::Stdlib:
+            m_stdlibs[Triple(lib->getISPCTarget(), lib->getOS(), lib->getArch()).encode()] = lib;
+            // "custom_linux" target is regular "linux" target for ARM with a few tweaks.
+            if (lib->getOS() == TargetOS::linux && (lib->getArch() == Arch::arm || lib->getArch() == Arch::aarch64)) {
+                m_stdlibs[Triple(lib->getISPCTarget(), TargetOS::custom_linux, lib->getArch()).encode()] = lib;
+            }
+            // PS5 is an alias to PS4 in terms of target files. All the tuning is done through CPU flags.
+            if (lib->getOS() == TargetOS::ps4) {
+                m_stdlibs[Triple(lib->getISPCTarget(), TargetOS::ps5, lib->getArch()).encode()] = lib;
             }
             break;
         }
@@ -155,12 +140,40 @@ const BitcodeLib *TargetLibRegistry::getBuiltinsCLib(TargetOS os, Arch arch) con
     }
     return nullptr;
 }
-const BitcodeLib *TargetLibRegistry::getISPCTargetLib(ISPCTarget target, TargetOS os, Arch arch) const {
+static const BitcodeLib *lGetTargetLib(const std::map<uint32_t, const BitcodeLib *> &libs, ISPCTarget target,
+                                       TargetOS os, Arch arch) {
     // TODO: validate parameters not to be errors or forbidden values.
 
     // This is an alias. It might be a good idea generalize this.
     if (target == ISPCTarget::avx1_i32x4) {
         target = ISPCTarget::sse4_i32x4;
+    }
+
+    // sse41 is an alias for sse4
+    switch (target) {
+    case ISPCTarget::sse41_i8x16:
+        target = ISPCTarget::sse4_i8x16;
+        break;
+    case ISPCTarget::sse41_i16x8:
+        target = ISPCTarget::sse4_i16x8;
+        break;
+    case ISPCTarget::sse41_i32x4:
+        target = ISPCTarget::sse4_i32x4;
+        break;
+    case ISPCTarget::sse41_i32x8:
+        target = ISPCTarget::sse4_i32x8;
+        break;
+    default:
+        // Fall through
+        ;
+    }
+
+    // There's no Mac that supports SPR, so the decision is not support these targets when targeting macOS.
+    // If these targets are linked in, then we still can use them for cross compilation, for example for Linux.
+    if (os == TargetOS::macos && (target == ISPCTarget::avx512spr_x4 || target == ISPCTarget::avx512spr_x8 ||
+                                  target == ISPCTarget::avx512spr_x16 || target == ISPCTarget::avx512spr_x32 ||
+                                  target == ISPCTarget::avx512spr_x64)) {
+        return nullptr;
     }
 
     // Canonicalize OS, as for the target we only differentiate between Windows, Unix, and Web (WASM target).
@@ -183,11 +196,51 @@ const BitcodeLib *TargetLibRegistry::getISPCTargetLib(ISPCTarget target, TargetO
         UNREACHABLE();
     }
 
-    auto result = m_targets.find(Triple(target, os, arch).encode());
-    if (result != m_targets.end()) {
+    auto result = libs.find(Triple(target, os, arch).encode());
+    if (result != libs.end()) {
         return result->second;
     }
     return nullptr;
+}
+
+const BitcodeLib *TargetLibRegistry::getISPCTargetLib(ISPCTarget target, TargetOS os, Arch arch) const {
+    return lGetTargetLib(m_targets, target, os, arch);
+}
+
+const BitcodeLib *TargetLibRegistry::getISPCStdLib(ISPCTarget target, TargetOS os, Arch arch) const {
+    return lGetTargetLib(m_stdlibs, target, os, arch);
+}
+
+std::vector<std::string> TargetLibRegistry::checkBitcodeLibs() const {
+    std::vector<std::string> missedFiles = {};
+    if (!g->isSlimBinary) {
+        return missedFiles;
+    }
+    for (ISPCTarget target = ISPCTarget::sse2_i32x4; target < ISPCTarget::error; target++) {
+        for (TargetOS os = TargetOS::windows; os < TargetOS::error; os++) {
+            for (Arch arch = Arch::none; arch < Arch::error; arch++) {
+                if (isSupported(target, os, arch)) {
+                    const BitcodeLib *clib = getBuiltinsCLib(os, arch);
+                    const BitcodeLib *tlib = getISPCTargetLib(target, os, arch);
+                    const BitcodeLib *slib = getISPCStdLib(target, os, arch);
+                    if (!clib->fileExists()) {
+                        missedFiles.push_back(clib->getFilename());
+                    }
+                    if (!tlib->fileExists()) {
+                        missedFiles.push_back(tlib->getFilename());
+                    }
+                    // Generic targets don't have standard libraries.
+                    if (ISPCTargetIsGeneric(target)) {
+                        continue;
+                    }
+                    if (!slib->fileExists()) {
+                        missedFiles.push_back(slib->getFilename());
+                    }
+                }
+            }
+        }
+    }
+    return missedFiles;
 }
 
 // Print user-friendly message about supported targets
@@ -198,23 +251,20 @@ void TargetLibRegistry::printSupportMatrix() const {
     // OS names row
     std::vector<std::string> os_names;
     os_names.push_back("");
-    for (int j = (int)TargetOS::windows; j < (int)TargetOS::error; j++) {
-        os_names.push_back(OSToString((TargetOS)j));
+    for (TargetOS os = TargetOS::windows; os < TargetOS::error; os++) {
+        os_names.push_back(OSToString(os));
     }
     table.push_back(os_names);
 
     // Fill in the name, one target per the row.
-    for (int i = (int)ISPCTarget::sse2_i32x4; i < (int)ISPCTarget::error; i++) {
+    for (ISPCTarget target = ISPCTarget::sse2_i32x4; target < ISPCTarget::error; target++) {
         std::vector<std::string> row;
-        ISPCTarget target = (ISPCTarget)i;
         row.push_back(ISPCTargetToString(target));
         std::vector<std::string> arch_list_target;
         // Fill in cell: list of arches for the target/os.
-        for (int j = (int)TargetOS::windows; j < (int)TargetOS::error; j++) {
+        for (TargetOS os = TargetOS::windows; os < TargetOS::error; os++) {
             std::string arch_list_os;
-            TargetOS os = (TargetOS)j;
-            for (int k = (int)Arch::none; k < (int)Arch::error; k++) {
-                Arch arch = (Arch)k;
+            for (Arch arch = Arch::none; arch < Arch::error; arch++) {
                 if (isSupported(target, os, arch)) {
                     if (!arch_list_os.empty()) {
                         arch_list_os += ", ";
@@ -257,13 +307,9 @@ void TargetLibRegistry::printSupportMatrix() const {
 
 std::string TargetLibRegistry::getSupportedArchs() {
     std::string archs;
-    for (int k = (int)Arch::none; k < (int)Arch::error; k++) {
-        Arch arch = (Arch)k;
-        for (int i = (int)ISPCTarget::sse2_i32x4; i < (int)ISPCTarget::error; i++) {
-            ISPCTarget target = (ISPCTarget)i;
-            for (int j = (int)TargetOS::windows; j < (int)TargetOS::error; j++) {
-                TargetOS os = (TargetOS)j;
-
+    for (Arch arch = Arch::none; arch < Arch::error; arch++) {
+        for (ISPCTarget target = ISPCTarget::sse2_i32x4; target < ISPCTarget::error; target++) {
+            for (TargetOS os = TargetOS::windows; os < TargetOS::error; os++) {
                 if (isSupported(target, os, arch)) {
                     if (!archs.empty()) {
                         archs += ", ";
@@ -280,23 +326,24 @@ std::string TargetLibRegistry::getSupportedArchs() {
 }
 
 std::string TargetLibRegistry::getSupportedTargets() {
-    std::string targets;
-    for (int i = (int)ISPCTarget::sse2_i32x4; i < (int)ISPCTarget::error; i++) {
-        ISPCTarget target = (ISPCTarget)i;
-        for (int j = (int)TargetOS::windows; j < (int)TargetOS::error; j++) {
-            TargetOS os = (TargetOS)j;
-            for (int k = (int)Arch::none; k < (int)Arch::error; k++) {
-                Arch arch = (Arch)k;
+    std::set<std::string> targetSet;
+    for (Arch arch = Arch::none; arch < Arch::error; arch++) {
+        for (ISPCTarget target = ISPCTarget::sse2_i32x4; target < ISPCTarget::error; target++) {
+            for (TargetOS os = TargetOS::windows; os < TargetOS::error; os++) {
                 if (isSupported(target, os, arch)) {
-                    if (!targets.empty()) {
-                        targets += ", ";
-                    }
-                    targets += ISPCTargetToString(target);
-                    goto next_target;
+                    targetSet.insert(ISPCTargetToString(target));
+                    break;
                 }
             }
         }
-    next_target:;
+    }
+
+    std::string targets;
+    for (const auto &target : targetSet) {
+        if (!targets.empty()) {
+            targets += ", ";
+        }
+        targets += target;
     }
 
     return targets;
@@ -306,9 +353,8 @@ std::string TargetLibRegistry::getSupportedOSes() {
     // We use pre-computed bitset, as this function is perfomance critical - it's used
     // during arguments parsing.
     std::string oses;
-    for (int j = (int)TargetOS::windows; j < (int)TargetOS::error; j++) {
-        TargetOS os = (TargetOS)j;
-        if (m_supported_oses[j]) {
+    for (TargetOS os = TargetOS::windows; os < TargetOS::error; os++) {
+        if (m_supported_oses[static_cast<int>(os)]) {
             if (!oses.empty()) {
                 oses += ", ";
             }

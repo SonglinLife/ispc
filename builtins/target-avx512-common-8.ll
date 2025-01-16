@@ -1,39 +1,88 @@
-;;  Copyright (c) 2020-2021, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2020-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 define(`MASK',`i1')
 define(`HAVE_GATHER',`1')
 define(`HAVE_SCATTER',`1')
 
 include(`target-avx512-utils.ll')
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; shuffles
+
+shuffle1(i8)
+shuffle1(half)
+shuffle1(double)
+shuffle1(i64)
+
+declare <WIDTH x i16> @llvm.x86.avx512.mask.permvar.hi.128(<WIDTH x i16>, <WIDTH x i16>, <WIDTH x i16>, i8)
+define <WIDTH x i16> @__shuffle_i16(<WIDTH x i16>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %ind = trunc <WIDTH x i32> %1 to <WIDTH x i16>
+  %res = call <WIDTH x i16> @llvm.x86.avx512.mask.permvar.hi.128(<WIDTH x i16> %0, <WIDTH x i16> %ind, <WIDTH x i16> zeroinitializer, i8 -1)
+  ret <WIDTH x i16> %res
+}
+
+declare <WIDTH x i32> @llvm.x86.avx512.mask.permvar.si.256(<WIDTH x i32>, <WIDTH x i32>, <WIDTH x i32>, i8)
+define <WIDTH x i32> @__shuffle_i32(<WIDTH x i32>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %res = call <WIDTH x i32>@llvm.x86.avx512.mask.permvar.si.256(<WIDTH x i32> %0, <WIDTH x i32> %1, <WIDTH x i32> zeroinitializer, i8 -1)
+  ret <WIDTH x i32> %res
+}
+
+declare <WIDTH x float> @llvm.x86.avx512.mask.permvar.sf.256(<WIDTH x float>, <WIDTH x i32>, <WIDTH x float>, i8)
+define <WIDTH x float> @__shuffle_float(<WIDTH x float>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %res = call <WIDTH x float> @llvm.x86.avx512.mask.permvar.sf.256(<WIDTH x float> %0, <WIDTH x i32> %1, <WIDTH x float> zeroinitializer, i8 -1)
+  ret <WIDTH x float> %res
+}
+
+define_shuffle2_const()
+shuffle2(i8)
+shuffle2(half)
+shuffle2(double)
+shuffle2(i64)
+
+declare <WIDTH x i16> @llvm.x86.avx512.vpermi2var.hi.128(<WIDTH x i16>, <WIDTH x i16>, <WIDTH x i16>)
+define <WIDTH x i16> @__shuffle2_i16(<WIDTH x i16>, <WIDTH x i16>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<WIDTH x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <WIDTH x i16> @__shuffle2_const_i16(<WIDTH x i16> %0, <WIDTH x i16> %1, <WIDTH x i32> %2)
+  ret <WIDTH x i16> %res_const
+
+not_const:
+  %ind = trunc <WIDTH x i32> %2 to <WIDTH x i16>
+  %res = call <WIDTH x i16> @llvm.x86.avx512.vpermi2var.hi.128(<WIDTH x i16> %0, <WIDTH x i16> %ind, <WIDTH x i16> %1)
+  ret <WIDTH x i16> %res
+}
+
+declare <WIDTH x i32> @llvm.x86.avx512.vpermi2var.d.256(<WIDTH x i32>, <WIDTH x i32>, <WIDTH x i32>)
+define <WIDTH x i32> @__shuffle2_i32(<WIDTH x i32>, <WIDTH x i32>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<WIDTH x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <WIDTH x i32> @__shuffle2_const_i32(<WIDTH x i32> %0, <WIDTH x i32> %1, <WIDTH x i32> %2)
+  ret <WIDTH x i32> %res_const
+
+not_const:
+  %res = call <WIDTH x i32> @llvm.x86.avx512.vpermi2var.d.256(<WIDTH x i32> %0, <WIDTH x i32> %2, <WIDTH x i32> %1)
+  ret <WIDTH x i32> %res
+}
+
+declare <WIDTH x float> @llvm.x86.avx512.vpermi2var.ps.256(<WIDTH x float>, <WIDTH x i32>, <WIDTH x float>)
+define <WIDTH x float> @__shuffle2_float(<WIDTH x float>, <WIDTH x float>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<WIDTH x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <WIDTH x float> @__shuffle2_const_float(<WIDTH x float> %0, <WIDTH x float> %1, <WIDTH x i32> %2)
+  ret <WIDTH x float> %res_const
+
+not_const:
+  %res = call <WIDTH x float> @llvm.x86.avx512.vpermi2var.ps.256(<WIDTH x float> %0, <WIDTH x i32> %2, <WIDTH x float> %1)
+  ret <WIDTH x float> %res
+}
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stub for mask conversion. LLVM's intrinsics want i1 mask, but we use i8
@@ -64,12 +113,12 @@ define <8 x i16> @__float_to_half_varying(<8 x float> %v) nounwind readnone {
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; rounding floats
 
-declare <8 x float> @llvm.nearbyint.v8f32(<8 x float> %p)
+declare <8 x float> @llvm.roundeven.v8f32(<8 x float> %p)
 declare <8 x float> @llvm.floor.v8f32(<8 x float> %p)
 declare <8 x float> @llvm.ceil.v8f32(<8 x float> %p)
 
 define <8 x float> @__round_varying_float(<8 x float>) nounwind readonly alwaysinline {
-  %res = call <8 x float> @llvm.nearbyint.v8f32(<8 x float> %0)
+  %res = call <8 x float> @llvm.roundeven.v8f32(<8 x float> %0)
   ret <8 x float> %res
 }
 
@@ -86,15 +135,15 @@ define <8 x float> @__ceil_varying_float(<8 x float>) nounwind readonly alwaysin
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; rounding doubles
 
-declare <4 x double> @llvm.nearbyint.v4f64(<4 x double> %p)
+declare <4 x double> @llvm.roundeven.v4f64(<4 x double> %p)
 declare <4 x double> @llvm.floor.v4f64(<4 x double> %p)
 declare <4 x double> @llvm.ceil.v4f64(<4 x double> %p)
 
 define <8 x double> @__round_varying_double(<8 x double>) nounwind readonly alwaysinline {
   %v0 = shufflevector <8 x double> %0, <8 x double> undef, <4 x i32> <i32 0, i32 1, i32 2, i32 3>
   %v1 = shufflevector <8 x double> %0, <8 x double> undef, <4 x i32> <i32 4, i32 5, i32 6, i32 7>
-  %r0 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v0)
-  %r1 = call <4 x double> @llvm.nearbyint.v4f64(<4 x double> %v1)
+  %r0 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v0)
+  %r1 = call <4 x double> @llvm.roundeven.v4f64(<4 x double> %v1)
   %res = shufflevector <4 x double> %r0, <4 x double> %r1, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
   ret <8 x double> %res
 }
@@ -667,6 +716,10 @@ define void @__masked_store_blend_double(<8 x double>* nocapture,
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; gather/scatter
 
+;; We need factored generic implementations when --opt=disable-gathers is used.
+;; The util functions for gathers already include factored implementations,
+;; so use factored ones here explicitely for remaining types only.
+
 ;; gather - i8
 gen_gather(i8)
 
@@ -675,6 +728,11 @@ gen_gather(i16)
 
 ;; gather - half
 gen_gather(half)
+
+gen_gather_factored_generic(i32)
+gen_gather_factored_generic(float)
+gen_gather_factored_generic(i64)
+gen_gather_factored_generic(double)
 
 ;; gather - i32
 declare <8 x i32> @llvm.x86.avx512.mask.gather3siv8.si(<8 x i32>, i8*, <8 x i32>, <8 x i1>, i32)
@@ -837,6 +895,10 @@ define void @__scatter_base_offsets64_$1(i8* %ptr, i32 %scale, <WIDTH x i64> %of
 }
 ')
 
+;; We need factored generic implementations when --opt=disable-scatters is used.
+;; The util functions for scatters already include factored implementations,
+;; so use factored ones here explicitely for remaining types only.
+
 ;; scatter - i8
 scatterbo32_64(i8)
 gen_scatter(i8)
@@ -848,6 +910,11 @@ gen_scatter(i16)
 ;; scatter - half
 scatterbo32_64(half)
 gen_scatter(half)
+
+gen_scatter_factored(i32)
+gen_scatter_factored(float)
+gen_scatter_factored(i64)
+gen_scatter_factored(double)
 
 ;; scatter - i32
 declare void @llvm.x86.avx512.mask.scattersiv8.si(i8*, <8 x i1>, <8 x i32>, <8 x i32>, i32)
@@ -1014,5 +1081,3 @@ define_prefetches()
 define_avgs()
 
 ;; Trigonometry
-transcendetals_decl()
-trigonometry_decl()

@@ -1,4 +1,4 @@
-// Copyright 2020-2022 Intel Corporation
+// Copyright 2020-2024 Intel Corporation
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "GPUDevice.h"
@@ -19,19 +19,37 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <list>
+#include <memory>
 #include <sstream>
 #include <vector>
-#include <memory>
+
+#if defined(_WIN32) || defined(_WIN64)
+#include <intrin.h>
+#endif
 
 // ispcrt
 #include "detail/Exception.h"
+#include "detail/ModuleOptions.h"
 
 // level0
 #include <level_zero/ze_api.h>
 
+extern "C" {
+ispcrt::base::Device *load_gpu_device() { return new ispcrt::GPUDevice; }
+ispcrt::base::Device *load_gpu_device_ctx(void *ctx, void *dev, uint32_t idx) {
+    return new ispcrt::GPUDevice(ctx, dev, idx);
+}
+uint32_t gpu_device_count() { return ispcrt::gpu::deviceCount(); }
+ISPCRTDeviceInfo gpu_device_info(uint32_t idx) { return ispcrt::gpu::deviceInfo(idx); }
+ispcrt::base::Context *load_gpu_context() { return new ispcrt::GPUContext; }
+ispcrt::base::Context *load_gpu_context_ctx(void *ctx) { return new ispcrt::GPUContext(ctx); }
+}
+
 #define DECLARE_ENV(NAME) const char *NAME = #NAME;
 DECLARE_ENV(ISPCRT_VERBOSE)
 DECLARE_ENV(ISPCRT_MAX_KERNEL_LAUNCHES)
+DECLARE_ENV(ISPCRT_GPU_DRIVER)
 DECLARE_ENV(ISPCRT_GPU_DEVICE)
 DECLARE_ENV(ISPCRT_MOCK_DEVICE)
 DECLARE_ENV(ISPCRT_GPU_THREAD_GROUP_SIZE_X)
@@ -41,6 +59,9 @@ DECLARE_ENV(ISPCRT_DISABLE_MULTI_COMMAND_LISTS)
 DECLARE_ENV(ISPCRT_DISABLE_COPY_ENGINE)
 DECLARE_ENV(ISPCRT_IGC_OPTIONS)
 DECLARE_ENV(ISPCRT_USE_ZEBIN)
+DECLARE_ENV(ISPCRT_MEM_POOL)
+DECLARE_ENV(ISPCRT_MEM_POOL_MIN_CHUNK_POW2)
+DECLARE_ENV(ISPCRT_MEM_POOL_MAX_CHUNK_POW2)
 #undef DECLARE_ENV
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -72,10 +93,68 @@ static void print_env(const char *env) {
     }
 }
 
+// Return true for name=1 and false for name=0. If any other value set (even empty string) then runtime error occures.
+static bool get_bool_envvar(const char *name) {
+    int parsed = 0;
+    const char *val = getenv_wr(name);
+    if (val) {
+        std::istringstream is(val);
+        is >> parsed;
+        if (is) {
+            if (parsed == 0) {
+                return false;
+            } else if (parsed == 1) {
+                return true;
+            }
+        }
+        std::stringstream ss;
+        ss << "Incorrect value of " << name << " variable, set 0 or 1.";
+        throw std::runtime_error(ss.str());
+    }
+    return false;
+}
+
+// Parse numberic value of size_t type from value of name environment variable.
+// If no variable presented in environment then return default_value.
+static size_t get_number_envvar(const char *name, size_t default_value) {
+    size_t parsed = 0;
+    const char *val = getenv_wr(name);
+    if (val) {
+        std::istringstream is(val);
+        is >> parsed;
+        if (is) {
+            return parsed;
+        }
+        std::stringstream ss;
+        ss << "Incorrect value of " << name << " variable, set correct numeric value.";
+        throw std::runtime_error(ss.str());
+    }
+    return default_value;
+}
+
+#if defined(_WIN32) || defined(_WIN64)
+#if defined(_WIN64)
+#define CLZ __lzcnt64
+#else // defined(_WIN64)
+#define CLZ __lzcnt
+#endif // defined(_WIN64)
+#else  // defined(_WIN32) || defined(_WIN64)
+#define CLZ __builtin_clzl
+#endif
+static size_t round_up_pow2(size_t x) {
+    size_t p = 0;
+    if (x < 2)
+        return x;
+    size_t lead_zeros = CLZ(x - 1);
+    p = 1ULL << (8 * sizeof(size_t) - lead_zeros);
+    return p;
+}
+#undef CLZ
+
 namespace ispcrt {
 namespace gpu {
 
-static const ISPCRTError getIspcrtError(ze_result_t err) {
+static ISPCRTError getIspcrtError(ze_result_t err) {
     auto res = ISPCRT_UNKNOWN_ERROR;
     switch (err) {
     case ZE_RESULT_SUCCESS:
@@ -248,6 +327,47 @@ struct Future : public ispcrt::base::Future {
     bool m_valid{false};
 };
 
+struct Fence : public ispcrt::base::Fence {
+    Fence(ze_command_queue_handle_t q) {
+        ze_fence_desc_t fenceDesc = {};
+
+        fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
+        fenceDesc.pNext = nullptr;
+        fenceDesc.flags = 0;
+
+        L0_SAFE_CALL(zeFenceCreate(q, &fenceDesc, &m_handle));
+        if (!m_handle)
+            throw std::runtime_error("Failed to create fence!");
+    }
+
+    virtual ~Fence() { L0_SAFE_CALL_NOEXCEPT(zeFenceDestroy(m_handle)); }
+
+    void sync() override {
+        uint64_t infinity = std::numeric_limits<uint64_t>::max();
+        L0_SAFE_CALL(zeFenceHostSynchronize(m_handle, infinity));
+    }
+
+    ISPCRTFenceStatus status() const override {
+        ze_result_t res = zeFenceQueryStatus(m_handle);
+        switch (res) {
+        case ZE_RESULT_NOT_READY:
+            return ISPCRT_FENCE_UNSIGNALED;
+        case ZE_RESULT_SUCCESS:
+            return ISPCRT_FENCE_SIGNALED;
+        default:
+            L0_THROW_IF(res);
+            return ISPCRT_FENCE_UNSIGNALED;
+        }
+    }
+
+    void reset() override { L0_SAFE_CALL(zeFenceReset(m_handle)); }
+
+    void *nativeHandle() const override { return m_handle; }
+
+  private:
+    ze_fence_handle_t m_handle;
+};
+
 struct Event {
     Event(ze_event_pool_handle_t pool, uint32_t index) : m_pool(pool), m_index(index) {}
 
@@ -361,8 +481,8 @@ struct CommandList {
 
   private:
     ze_command_list_handle_t m_handle{nullptr};
-    ze_context_handle_t m_context{nullptr};
     ze_device_handle_t m_device{nullptr};
+    ze_context_handle_t m_context{nullptr};
     const uint32_t m_ordinal{0};
     bool m_submitted{false};
     uint32_t m_numCommands{0};
@@ -379,7 +499,8 @@ struct EventPool {
               ISPCRTEventPoolType type = ISPCRTEventPoolType::compute)
         : m_context(context), m_device(device) {
         // Get device timestamp resolution
-        ze_device_properties_t device_properties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+        ze_device_properties_t device_properties{};
+        device_properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
         L0_SAFE_CALL(zeDeviceGetProperties(m_device, &device_properties));
         m_timestampFreq = device_properties.timerResolution;
         if (device_properties.kernelTimestampValidBits < 64) {
@@ -390,25 +511,18 @@ struct EventPool {
             m_timestampMaxValue = (uint64_t)-1;
         }
         // Create pool
-        auto poolSize = POOL_SIZE_CAP;
+        m_poolSize = POOL_SIZE_CAP;
         // For compute event pool check if ISPCRT_MAX_KERNEL_LAUNCHES is set
         if (type == ISPCRTEventPoolType::compute) {
             // User can set a lower limit for the pool size, which in fact limits
             // the number of possible kernel launches. To make it more clear for the user,
             // the variable is named ISPCRT_MAX_KERNEL_LAUNCHES
-            const char *poolSizeEnv = getenv_wr(ISPCRT_MAX_KERNEL_LAUNCHES);
-            if (poolSizeEnv) {
-                std::istringstream(poolSizeEnv) >> poolSize;
-            }
-            if (poolSize > POOL_SIZE_CAP) {
+            m_poolSize = get_number_envvar(ISPCRT_MAX_KERNEL_LAUNCHES, m_poolSize);
+            if (m_poolSize > POOL_SIZE_CAP) {
                 m_poolSize = POOL_SIZE_CAP;
-                std::cerr << "[ISPCRT][WARNING] " << ISPCRT_MAX_KERNEL_LAUNCHES << " value too large, using " << POOL_SIZE_CAP
-                          << " instead." << std::endl;
-            } else {
-                m_poolSize = poolSize;
+                std::cerr << "[ISPCRT][WARNING] " << ISPCRT_MAX_KERNEL_LAUNCHES << " value too large, using "
+                          << POOL_SIZE_CAP << " instead." << std::endl;
             }
-        } else {
-            m_poolSize = poolSize;
         }
         ze_event_pool_desc_t eventPoolDesc = {};
         eventPoolDesc.count = m_poolSize;
@@ -422,7 +536,7 @@ struct EventPool {
             throw std::runtime_error(ss.str());
         }
         // Put all event ids into a freelist
-        for (uint32_t i = 0; i < m_poolSize; i++) {
+        for (size_t i = 0; i < m_poolSize; i++) {
             m_freeList.push_back(i);
         }
     }
@@ -494,19 +608,267 @@ struct EventPool {
     ze_event_pool_handle_t m_pool{nullptr};
     uint64_t m_timestampFreq;
     uint64_t m_timestampMaxValue;
-    uint32_t m_poolSize;
-    std::deque<uint32_t> m_freeList;
+    size_t m_poolSize;
+    std::deque<size_t> m_freeList;
     // Events pool for reuse
     std::vector<Event *> m_events_pool;
 };
 
+// Class to contain a single rather big memory hunk. This hunk allocated once.
+// It is virtually splitted into smaller chunks of same size.
+class Bulk {
+  public:
+    // No actual shared memory allocation happen in bulk constructor. It is
+    // delayed until actual requests to allocate memory.
+    Bulk(size_t chunkSize, size_t size, ze_context_handle_t ctxt, ze_device_handle_t dev)
+        : m_chunkSize(chunkSize), m_size(size), m_numChunks(size / chunkSize), m_ctxt(ctxt), m_dev(dev) {}
+
+    // Note: when using that constructor, one should set device handle later.
+    Bulk(size_t chunkSize, size_t size, ze_context_handle_t ctxt)
+        : m_chunkSize(chunkSize), m_size(size), m_numChunks(size / chunkSize), m_ctxt(ctxt) {}
+
+    // Free memory hunk
+    ~Bulk() { deallocate(); }
+
+    // Allocate and return a pointer to free chunk inside bulk
+    void *allocChunk() {
+        // Allocate size hunk once lazily on the first real allocation.
+        if (!m_memPtr)
+            allocate();
+
+        // The initial allocation works in linear allocator fashion.
+        // m_initFreeChunks goes up to m_numChunks only once, after that all
+        // allocation would request free chunks from the list of free chunks.
+        // The map of used chunks is updated as well. It is needed to search
+        // index of chunk by memory pointer.
+        assert(m_memPtr);
+        if (m_freeChunks.empty() && m_initFreeChunks < m_numChunks) {
+            void *ptr = chunkPtr(m_initFreeChunks);
+            m_usedChunks[ptr] = m_initFreeChunks++;
+            return ptr;
+        } else {
+            if (!m_freeChunks.empty()) {
+                size_t idx = m_freeChunks.front();
+                m_freeChunks.pop_front();
+                void *ptr = chunkPtr(idx);
+                m_usedChunks[ptr] = idx;
+                return ptr;
+            } else {
+                // TODO! Really?
+                assert(false);
+                return nullptr;
+            }
+        }
+    }
+
+    // Free chunk
+    void freeChunk(void *ptr) {
+        // Find chunk index by memory pointer, delete it from used and place it
+        // to free ones.
+        auto it = m_usedChunks.find(ptr);
+        assert(it != m_usedChunks.end());
+        m_freeChunks.push_back(it->second);
+        m_usedChunks.erase(it);
+    }
+
+    // Return true if there is no empty chunks
+    bool full() { return !(m_initFreeChunks < m_numChunks) && m_freeChunks.empty(); }
+
+    // Getter and setter for device handle. It is needed because sometimes Bulk
+    // objects are created before device handle is constructed.
+    ze_device_handle_t hDev() const { return m_dev; }
+    void hDev(ze_device_handle_t dev) { m_dev = dev; }
+
+  private:
+    char *m_memPtr{nullptr};
+
+    size_t m_chunkSize{0};
+    size_t m_size{0};
+    size_t m_numChunks{0};
+
+    // Index of free chunk during initial linear allocation.
+    size_t m_initFreeChunks{0};
+
+    // Contain free chunk indexes
+    std::list<size_t> m_freeChunks;
+
+    std::unordered_map<void *, size_t> m_usedChunks;
+
+    ze_context_handle_t m_ctxt{nullptr};
+    ze_device_handle_t m_dev{nullptr};
+
+    char *chunkPtr(size_t i) { return m_memPtr + m_chunkSize * i; }
+
+    void *allocate() {
+        ze_result_t status;
+        ze_device_mem_alloc_desc_t dev_desc = {};
+        ze_host_mem_alloc_desc_t host_desc = {};
+
+        // The best scenario would be if zeMemAllocShared was able to allocate
+        // memory aligned to size. In that case, it would be easier to
+        // found the Bulk that own a specific chunk. At least, 4 MB doesn't
+        // work, so we need to track chuck(ptr)->Bulk map in the ChunkedPool.
+        status = zeMemAllocShared(m_ctxt, &dev_desc, &host_desc, m_size, 64, m_dev, (void **)&m_memPtr);
+        L0_THROW_IF(status);
+
+        return m_memPtr;
+    }
+
+    void deallocate() {
+        if (m_memPtr)
+            L0_SAFE_CALL_NOEXCEPT(zeMemFree(m_ctxt, m_memPtr));
+    }
+};
+
+// ChunkedPool contains Bulks for some chunk size. It manages lists of bulks
+// for every size. If needed additional bulks are created.
+class ChunkedPool {
+  public:
+    ChunkedPool(ISPCRTSharedMemoryAllocationHint type, ze_context_handle_t ctxt) : m_type(type), m_ctxt(ctxt) {
+        if (UNLIKELY(is_verbose)) {
+            std::cout << "ChunkedPool for " << m_type << " shared memory allocation hint created." << std::endl;
+        }
+        m_minPow2 = get_number_envvar(ISPCRT_MEM_POOL_MIN_CHUNK_POW2, m_minPow2);
+        if (!(m_minPow2 >= 1 && m_minPow2 <= 30)) {
+            throw std::runtime_error("ISPCRT_MEM_POOL_MIN_CHUNK_POW2 is beyond reasonable limits");
+        }
+        m_maxPow2 = get_number_envvar(ISPCRT_MEM_POOL_MAX_CHUNK_POW2, m_maxPow2);
+        if (!(m_maxPow2 >= m_minPow2 && m_maxPow2 <= 30)) {
+            throw std::runtime_error("ISPCRT_MEM_POOL_MAX_CHUNK_POW2 is beyond reasonable limits");
+        }
+        m_minChunkSize = 1ULL << m_minPow2;
+        m_maxChunkSize = 1ULL << m_maxPow2;
+
+        // Create empty Bulk objects for chunks of power of 2.
+        for (size_t i = m_minPow2; i <= m_maxPow2; i++) {
+            size_t chunkSize = 1ULL << i;
+            m_bulks[chunkSize] = std::list<Bulk *>({new Bulk(chunkSize, m_maxChunkSize, m_ctxt)});
+        }
+    }
+
+    ~ChunkedPool() {
+        for (auto &l : m_bulks)
+            for (auto b : l.second)
+                delete b;
+    }
+
+    void *allocate(size_t size) {
+        assert(size == round_up_pow2(size));
+        assert(size <= m_maxChunkSize);
+        assert(size >= m_minChunkSize);
+
+        auto &bulks = m_bulks[size];
+
+        bool allFull = true;
+        Bulk *blk = bulks.front();
+        for (size_t i = 0; i < bulks.size(); i++) {
+            if (blk->full()) {
+                bulks.pop_front();
+                bulks.push_back(blk);
+                blk = bulks.front();
+                continue;
+            }
+            allFull = false;
+            break;
+        }
+        if (allFull) {
+            blk = new Bulk(size, m_maxChunkSize, m_ctxt, m_dev);
+            bulks.push_back(blk);
+        }
+
+        void *mem_ptr = blk->allocChunk();
+        m_allocated[mem_ptr] = blk;
+        return mem_ptr;
+    }
+
+    void deallocate(void *ptr) {
+        auto it = m_allocated.find(ptr);
+        assert(it != m_allocated.end());
+        Bulk *blk = it->second;
+        blk->freeChunk(ptr);
+        m_allocated.erase(it);
+    }
+
+    // Getter and setter for device handle. It is needed because ChunkedPool
+    // may be constructed inside Context before device creation.
+    ze_device_handle_t hDev() const { return m_dev; }
+    void hDev(ze_device_handle_t dev) {
+        m_dev = dev;
+        // Update device handle in all bulks.
+        for (auto &l : m_bulks)
+            for (auto &b : l.second)
+                if (!b->hDev())
+                    b->hDev(dev);
+    }
+
+    size_t minChunkSize() const { return m_minChunkSize; }
+    size_t maxChunkSize() const { return m_maxChunkSize; }
+
+  private:
+    // Shared memory with allocation hint stored in this ChunkedPool
+    ISPCRTSharedMemoryAllocationHint m_type;
+
+    // Contains lists of bulks for some chunk sizes.
+    std::unordered_map<size_t, std::list<Bulk *>> m_bulks;
+
+    // Map every allocated memory to Bulk that contains it.
+    std::unordered_map<void *, Bulk *> m_allocated;
+
+    ze_context_handle_t m_ctxt{nullptr};
+    ze_device_handle_t m_dev{nullptr};
+
+    size_t m_minPow2{6};
+    size_t m_maxPow2{21};
+
+    // Default values for minimal and maximal stored chunk sizes.
+    // Cut-off of chunking allocations 2 MB.
+    // 2MB corresponds with DG2 shared mem allocation. To utilize it with less
+    // overhead it may be useful to decrease it.
+    size_t m_minChunkSize{1ULL << 6};
+    size_t m_maxChunkSize{1ULL << 21};
+};
+
 struct MemoryView : public ispcrt::base::MemoryView {
-    MemoryView(ze_context_handle_t context, ze_device_handle_t device, void *appMem, size_t numBytes, bool shared)
-        : m_hostPtr(appMem), m_size(numBytes), m_context(context), m_device(device), m_shared(shared) {}
+    MemoryView(ze_context_handle_t context, ze_device_handle_t device, void *appMem, size_t numBytes,
+               const ISPCRTNewMemoryViewFlags *flags, const GPUContext *ctxt)
+        : m_size(numBytes), m_requestedSize(numBytes), m_context(context), m_device(device),
+          m_shared(flags->allocType == ISPCRT_ALLOC_TYPE_SHARED), m_smhint(flags->smHint), m_ctxtGPU(ctxt) {
+        // We need context object to be alive until memoryview is alive
+        if (m_ctxtGPU) {
+            m_ctxtGPU->refInc();
+        }
+
+        if (flags->smHint == ISPCRT_SM_APPLICATION_MANAGED_DEVICE) {
+            m_devicePtr = appMem;
+        } else {
+            m_hostPtr = appMem;
+        }
+
+        // Use MemPool only when it is explicitly enabled with env var and memory hint is not device/host read/write
+        m_useMemPool = get_bool_envvar(ISPCRT_MEM_POOL) && (m_smhint != ISPCRT_SM_HOST_DEVICE_READ_WRITE) &&
+                       (m_smhint != ISPCRT_SM_APPLICATION_MANAGED_DEVICE);
+        if (m_ctxtGPU && m_useMemPool) {
+            m_memPool = m_ctxtGPU->memPool(m_smhint);
+            if (!m_memPool->hDev())
+                m_memPool->hDev(device);
+        }
+    }
 
     ~MemoryView() {
-        if (m_devicePtr)
-            L0_SAFE_CALL_NOEXCEPT(zeMemFree(m_context, m_devicePtr));
+        if (m_devicePtr && m_smhint != ISPCRT_SM_APPLICATION_MANAGED_DEVICE) {
+            if (m_shared && m_useMemPool && m_size <= m_memPool->maxChunkSize()) {
+                m_memPool->deallocate(m_devicePtr);
+                if (UNLIKELY(is_verbose)) {
+                    std::cout << "MemPool deallocation at " << m_devicePtr << std::endl;
+                }
+            } else {
+                L0_SAFE_CALL_NOEXCEPT(zeMemFree(m_context, m_devicePtr));
+            }
+        }
+
+        if (m_ctxtGPU) {
+            m_ctxtGPU->refDec();
+        }
     }
 
     bool isShared() { return m_shared; }
@@ -522,39 +884,103 @@ struct MemoryView : public ispcrt::base::MemoryView {
     size_t numBytes() { return m_size; };
 
   private:
-    void allocate() {
-        ze_result_t status;
-        if (m_shared) {
-            ze_device_mem_alloc_desc_t device_alloc_desc = {};
-            ze_host_mem_alloc_desc_t host_alloc_desc = {};
-            if (!m_context)
-                throw std::runtime_error("Context handle is NULL!");
-            status =
-                zeMemAllocShared(m_context, &device_alloc_desc, &host_alloc_desc, m_size, 64, m_device, &m_devicePtr);
-        } else {
-            ze_device_mem_alloc_desc_t allocDesc = {};
-            if (!m_device)
-                throw std::runtime_error("Device handle is NULL!");
-            status = zeMemAllocDevice(m_context, &allocDesc, m_size, m_size, m_device, &m_devicePtr);
-        }
+    void allocDevice() {
+        if (!m_device)
+            throw std::runtime_error("Device handle is NULL!");
+
+        ze_device_mem_alloc_desc_t allocDesc = {};
+        ze_result_t status = zeMemAllocDevice(m_context, &allocDesc, m_size, 64, m_device, &m_devicePtr);
+
         if (status != ZE_RESULT_SUCCESS)
             m_devicePtr = nullptr;
         L0_THROW_IF(status);
     }
 
-    bool m_shared{false};
-    void *m_hostPtr{nullptr};
-    void *m_devicePtr{nullptr};
-    size_t m_size{0};
+    void allocShared() {
+        if (!m_context)
+            throw std::runtime_error("Context handle is NULL!");
 
-    ze_device_handle_t m_device{nullptr};
+        ze_device_mem_alloc_desc_t device_alloc_desc = {};
+        ze_host_mem_alloc_desc_t host_alloc_desc = {};
+        ze_result_t status =
+            zeMemAllocShared(m_context, &device_alloc_desc, &host_alloc_desc, m_size, 64, m_device, &m_devicePtr);
+
+        if (status != ZE_RESULT_SUCCESS)
+            m_devicePtr = nullptr;
+        L0_THROW_IF(status);
+        if (UNLIKELY(is_verbose)) {
+            std::cout << "zeMemAllocShared " << m_size << " for requested " << m_requestedSize << " at " << m_devicePtr
+                      << std::endl;
+        }
+    }
+
+    void allocate() {
+        if (m_shared) {
+
+            if (m_useMemPool && m_size <= m_memPool->maxChunkSize()) {
+                m_size = round_up_pow2(m_requestedSize);
+                if (m_size < m_memPool->minChunkSize()) {
+                    m_size = m_memPool->minChunkSize();
+                }
+
+                m_devicePtr = m_memPool->allocate(m_size);
+                assert(m_devicePtr);
+                if (UNLIKELY(is_verbose)) {
+                    std::cout << "MemPool allocation " << m_size << "(" << m_requestedSize << ") at " << m_devicePtr
+                              << std::endl;
+                }
+            } else {
+                allocShared();
+            }
+
+        } else {
+            allocDevice();
+        }
+    }
+
+    void *m_hostPtr{nullptr};
+    size_t m_size{0};
+    size_t m_requestedSize{0};
+
     ze_context_handle_t m_context{nullptr};
+    ze_device_handle_t m_device{nullptr};
+
+    void *m_devicePtr{nullptr};
+
+    bool m_shared{false};
+    ISPCRTSharedMemoryAllocationHint m_smhint{ISPCRT_SM_HOST_DEVICE_READ_WRITE};
+    const GPUContext *m_ctxtGPU{nullptr};
+
+    bool m_useMemPool{false};
+    ChunkedPool *m_memPool{nullptr};
+};
+
+struct ModuleOptions : public ispcrt::base::ModuleOptions {
+    ModuleOptions() = default;
+    ModuleOptions(ISPCRTModuleType moduleType, bool libraryCompilation = false, uint32_t stackSize = 0)
+        : m_moduleType{moduleType}, m_libraryCompilation{libraryCompilation}, m_stackSize{stackSize} {}
+
+    uint32_t stackSize() const { return m_stackSize; }
+    bool libraryCompilation() const { return m_libraryCompilation; }
+    ISPCRTModuleType moduleType() const { return m_moduleType; }
+
+    void setStackSize(uint32_t size) { m_stackSize = size; }
+    void setLibraryCompilation(bool isLibraryCompilation) { m_libraryCompilation = isLibraryCompilation; }
+    void setModuleType(ISPCRTModuleType type) { m_moduleType = type; }
+
+  private:
+    ISPCRTModuleType m_moduleType{ISPCRTModuleType::ISPCRT_VECTOR_MODULE};
+    bool m_libraryCompilation{false};
+    uint32_t m_stackSize{0};
 };
 
 struct Module : public ispcrt::base::Module {
     Module(ze_device_handle_t device, ze_context_handle_t context, const char *moduleFile, const bool is_mock_dev,
-           const ISPCRTModuleOptions &opts)
+           const base::ModuleOptions &opts)
         : m_file(moduleFile) {
+        m_module_desc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+        m_module_desc_exp.stype = ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC;
+
         std::ifstream is;
         ze_module_format_t moduleFormat = ZE_MODULE_FORMAT_IL_SPIRV;
 
@@ -562,7 +988,7 @@ struct Module : public ispcrt::base::Module {
         if (!is_mock_dev) {
             // Try to open spv file by default if ISPCRT_USE_ZEBIN is not set.
             // TODO: change default to zebin when it gets more mature
-            const char *userZEBinFormatEnv = getenv_wr(ISPCRT_USE_ZEBIN);
+            bool userZEBinFormatEnv = get_bool_envvar(ISPCRT_USE_ZEBIN);
             if (userZEBinFormatEnv) {
                 is.open(m_file + ".bin", std::ios::binary);
                 moduleFormat = ZE_MODULE_FORMAT_NATIVE;
@@ -598,24 +1024,18 @@ struct Module : public ispcrt::base::Module {
         m_igc_options = "";
         // If scalar module is passed to ISPC Runtime, do not use VC backend
         // options on it
-        if (opts.moduleType != ISPCRTModuleType::ISPCRT_SCALAR_MODULE) {
-            m_igc_options += "-vc-codegen -no-optimize -Xfinalizer '-presched'";
-#if defined(__linux__)
-            // `newspillcost` is not yet supported on Windows in open source
-            // TODO: use `newspillcost` for all platforms as soon as it available
-            m_igc_options += " -Xfinalizer '-newspillcost'";
-#endif
+        if (opts.moduleType() != ISPCRTModuleType::ISPCRT_SCALAR_MODULE) {
+            m_igc_options += "-vc-codegen -no-optimize -Xfinalizer '-presched' -Xfinalizer '-newspillcostispc'";
         }
         // If stackSize has default value 0, do not set -stateless-stack-mem-size,
         // it will be set to 8192 in VC backend by default.
-        if (opts.stackSize > 0) {
-            m_igc_options += " -stateless-stack-mem-size=" + std::to_string(opts.stackSize);
+        if (opts.stackSize() > 0) {
+            m_igc_options += " -stateless-stack-mem-size=" + std::to_string(opts.stackSize());
         }
         // If module is a library for the kernel, add " -library-compilation"
-        if (opts.libraryCompilation) {
+        if (opts.libraryCompilation()) {
             m_igc_options += " -library-compilation";
         }
-        constexpr auto MAX_ISPCRT_IGC_OPTIONS = 2000UL;
         const char *userIgcOptionsEnv = getenv_wr(ISPCRT_IGC_OPTIONS);
         if (userIgcOptionsEnv) {
             // Copy at most MAX_ISPCRT_IGC_OPTIONS characters from the env - just to be safe
@@ -646,7 +1066,7 @@ struct Module : public ispcrt::base::Module {
             ze_module_build_log_handle_t hLog = nullptr;
             size_t size = 0;
 
-            std::cout << "Module " << m_file  << " format=" << moduleFormat;
+            std::cout << "Module " << m_file << " format=" << moduleFormat;
             std::cout << " size=" << codeSize << std::endl;
             std::cout << "IGC options: " << m_igc_options << std::endl;
 
@@ -669,13 +1089,16 @@ struct Module : public ispcrt::base::Module {
             throw std::runtime_error("Failed to load spv module!");
     }
 
-    Module(ze_device_handle_t device, ze_context_handle_t context, Module** modules, const uint32_t numModules) {
-        bool useZEBinFormat = getenv_wr(ISPCRT_USE_ZEBIN) != NULL;
+    Module(ze_device_handle_t device, ze_context_handle_t context, Module **modules, const uint32_t numModules) {
+        m_module_desc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+        m_module_desc_exp.stype = ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC;
+
+        bool useZEBinFormat = get_bool_envvar(ISPCRT_USE_ZEBIN);
 
         std::vector<const char *> buildFlags;
         std::vector<size_t> inputSizes;
         std::vector<const uint8_t *> inputModules;
-        for (int i = 0; i < numModules; i++) {
+        for (uint32_t i = 0; i < numModules; i++) {
             buildFlags.push_back(modules[i]->m_module_desc.pBuildFlags);
             inputSizes.push_back(modules[i]->m_module_desc.inputSize);
             inputModules.push_back(modules[i]->m_module_desc.pInputModule);
@@ -735,8 +1158,8 @@ struct Module : public ispcrt::base::Module {
     std::string m_file;
     std::vector<unsigned char> m_code;
 
-    ze_module_desc_t m_module_desc{ZE_STRUCTURE_TYPE_MODULE_DESC};
-    ze_module_program_exp_desc_t m_module_desc_exp{ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC};
+    ze_module_desc_t m_module_desc{};
+    ze_module_program_exp_desc_t m_module_desc_exp{};
     ze_module_handle_t m_module{nullptr};
 
     std::string m_igc_options;
@@ -777,6 +1200,206 @@ struct Kernel : public ispcrt::base::Kernel {
     ze_kernel_handle_t m_kernel{nullptr};
 };
 
+struct CommandListImpl : ispcrt::base::CommandList {
+    CommandListImpl(ze_device_handle_t hDev, ze_context_handle_t hCtx, ze_command_queue_handle_t hQ, uint32_t ordinal)
+        : m_q(hQ) {
+        ze_command_list_desc_t desc = {};
+        desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+        desc.pNext = nullptr;
+        desc.commandQueueGroupOrdinal = ordinal;
+        desc.flags = 0;
+
+        L0_SAFE_CALL(zeCommandListCreate(hCtx, hDev, &desc, &m_handle));
+
+        if (!m_handle)
+            throw std::runtime_error("Failed to create command list!");
+    }
+
+    ~CommandListImpl() {
+        clearFences();
+        clearFutures();
+        L0_SAFE_CALL_NOEXCEPT(zeCommandListDestroy(m_handle));
+    }
+
+    void barrier() override { L0_SAFE_CALL(zeCommandListAppendBarrier(m_handle, nullptr, 0, nullptr)); }
+
+    ispcrt::base::Future *copyToHost(ispcrt::base::MemoryView &mv) override {
+        auto &view = (gpu::MemoryView &)mv;
+        L0_SAFE_CALL(zeCommandListAppendMemoryCopy(m_handle, view.hostPtr(), view.devicePtr(), view.numBytes(), nullptr,
+                                                   0, nullptr));
+        // TODO! Support timestamp events.
+        Future *f = new Future();
+        m_futures.push_back(f);
+        return f;
+    }
+
+    ispcrt::base::Future *copyToDevice(ispcrt::base::MemoryView &mv) override {
+        auto &view = (gpu::MemoryView &)mv;
+        L0_SAFE_CALL(zeCommandListAppendMemoryCopy(m_handle, view.devicePtr(), view.hostPtr(), view.numBytes(), nullptr,
+                                                   0, nullptr));
+        // TODO! Support timestamp events.
+        Future *f = new Future();
+        m_futures.push_back(f);
+        return f;
+    }
+
+    ispcrt::base::Future *copyMemoryView(base::MemoryView &mv_dst, base::MemoryView &mv_src,
+                                         const size_t size) override {
+        auto &view_dst = (gpu::MemoryView &)mv_dst;
+        auto &view_src = (gpu::MemoryView &)mv_src;
+        L0_SAFE_CALL(zeCommandListAppendMemoryCopy(m_handle, view_dst.devicePtr(), view_src.devicePtr(), size, nullptr,
+                                                   0, nullptr));
+        // TODO! Support timestamp events.
+        Future *f = new Future();
+        m_futures.push_back(f);
+        return f;
+    }
+
+    ispcrt::base::Future *launch(ispcrt::base::Kernel &k, ispcrt::base::MemoryView *params, size_t dim0, size_t dim1,
+                                 size_t dim2) override {
+        auto &kernel = (gpu::Kernel &)k;
+
+        void *param_ptr = nullptr;
+        if (params)
+            param_ptr = params->devicePtr();
+
+        // If param_ptr is nullptr, it was not set on host, so do not set kernel argument.
+        if (param_ptr != nullptr) {
+            L0_SAFE_CALL(zeKernelSetArgumentValue(kernel.handle(), 0, sizeof(void *), &param_ptr));
+        }
+
+        std::array<uint32_t, 3> groupSize = {0};
+        L0_SAFE_CALL(zeKernelSuggestGroupSize(kernel.handle(), uint32_t(dim0), uint32_t(dim1), uint32_t(dim2),
+                                              &groupSize[0], &groupSize[1], &groupSize[2]));
+        // TODO: Is this needed? Didn't find info in spec on the valid values that zeKernelSuggestGroupSize will return
+        groupSize[0] = std::max(groupSize[0], uint32_t(1));
+        groupSize[1] = std::max(groupSize[1], uint32_t(1));
+        groupSize[2] = std::max(groupSize[2], uint32_t(1));
+
+        L0_SAFE_CALL(zeKernelSetGroupSize(kernel.handle(), groupSize[0], groupSize[1], groupSize[2]));
+
+        const ze_group_count_t dispatchTraits = {uint32_t(dim0) / groupSize[0], uint32_t(dim1) / groupSize[1],
+                                                 uint32_t(dim2) / groupSize[2]};
+
+        L0_SAFE_CALL(zeCommandListAppendLaunchKernel(m_handle, kernel.handle(), &dispatchTraits, nullptr, 0, nullptr));
+        // TODO! Support timestamp events.
+        Future *f = new Future();
+        m_futures.push_back(f);
+        return f;
+    }
+
+    void close() override {
+        if (!m_closed) {
+            L0_SAFE_CALL(zeCommandListClose(m_handle));
+        }
+        m_closed = true;
+    }
+
+    ispcrt::base::Fence *submit() override {
+        close();
+
+        Fence *fence = new Fence(m_q);
+        m_fences.push_back(fence);
+        ze_fence_handle_t hFence = (ze_fence_handle_t)fence->nativeHandle();
+        L0_SAFE_CALL(zeCommandQueueExecuteCommandLists(m_q, 1, &m_handle, hFence));
+        return fence;
+    }
+
+    void reset() override {
+        m_closed = false;
+        clearFences();
+        clearFutures();
+        L0_SAFE_CALL(zeCommandListReset(m_handle));
+    }
+
+    // This has no effect at the moment.
+    void enableTimestamps() override { m_timestamps = true; }
+
+    void *nativeHandle() const override { return m_handle; }
+
+  private:
+    ze_command_list_handle_t m_handle{nullptr};
+    ze_command_queue_handle_t m_q{nullptr};
+
+    bool m_closed{false};
+    bool m_timestamps{false};
+
+    std::vector<Future *> m_futures;
+    std::vector<Fence *> m_fences;
+
+    void clearFences() {
+        if (m_fences.size()) {
+            for (const auto &f : m_fences) {
+                f->refDec();
+            }
+            m_fences.clear();
+        }
+    }
+
+    void clearFutures() {
+        if (m_futures.size()) {
+            for (const auto &f : m_futures) {
+                f->refDec();
+            }
+            m_futures.clear();
+        }
+    }
+};
+
+struct CommandQueueImpl : ispcrt::base::CommandQueue {
+    CommandQueueImpl(ze_device_handle_t hDev, ze_context_handle_t hCtx, uint32_t ordinal)
+        : m_dev(hDev), m_ctx(hCtx), m_ordinal(ordinal) {
+        ze_command_queue_desc_t desc = {};
+        desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+        desc.pNext = nullptr;
+        desc.ordinal = ordinal;
+        desc.index = 0;
+        desc.flags = 0;
+        desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+        desc.priority = ZE_COMMAND_QUEUE_PRIORITY_NORMAL;
+
+        L0_SAFE_CALL(zeCommandQueueCreate(hCtx, hDev, &desc, &m_handle));
+
+        if (!m_handle)
+            throw std::runtime_error("Failed to create command queue!");
+    }
+
+    ~CommandQueueImpl() {
+        clearCommandList();
+        L0_SAFE_CALL_NOEXCEPT(zeCommandQueueDestroy(m_handle));
+    }
+
+    ispcrt::base::CommandList *createCommandList() override {
+        CommandListImpl *p = new CommandListImpl(m_dev, m_ctx, m_handle, m_ordinal);
+        m_cmdlists.push_back(p);
+        return p;
+    }
+
+    void sync() override {
+        uint64_t infinity = std::numeric_limits<uint64_t>::max();
+        L0_SAFE_CALL(zeCommandQueueSynchronize(m_handle, infinity));
+    }
+
+    void *nativeHandle() const override { return m_handle; }
+
+  private:
+    ze_command_queue_handle_t m_handle{nullptr};
+    ze_device_handle_t m_dev{nullptr};
+    ze_context_handle_t m_ctx{nullptr};
+    uint32_t m_ordinal{0};
+
+    std::vector<CommandListImpl *> m_cmdlists;
+
+    void clearCommandList() {
+        if (m_cmdlists.size()) {
+            for (const auto &l : m_cmdlists) {
+                l->refDec();
+            }
+            m_cmdlists.clear();
+        }
+    }
+};
+
 struct CommandQueue {
     CommandQueue(ze_device_handle_t dev, ze_context_handle_t ctxt, uint32_t ordinal) {
         // Create compute command queue
@@ -793,9 +1416,8 @@ struct CommandQueue {
 
     ze_command_queue_handle_t handle() const { return m_handle; }
 
-    ~CommandQueue() {
-        L0_SAFE_CALL_NOEXCEPT(zeCommandQueueDestroy(m_handle));
-    }
+    ~CommandQueue() { L0_SAFE_CALL_NOEXCEPT(zeCommandQueueDestroy(m_handle)); }
+
   private:
     ze_command_queue_handle_t m_handle{nullptr};
 };
@@ -810,8 +1432,8 @@ struct TaskQueue : public ispcrt::base::TaskQueue {
         uint32_t copyOrdinal = std::numeric_limits<uint32_t>::max();
         uint32_t computeOrdinal = 0;
         // Check env variable before queue configuration
-        bool isCopyEngineEnabled = getenv_wr(ISPCRT_DISABLE_COPY_ENGINE) == nullptr;
-        bool useMultipleCommandLists = getenv_wr(ISPCRT_DISABLE_MULTI_COMMAND_LISTS) == nullptr;
+        bool isCopyEngineEnabled = !get_bool_envvar(ISPCRT_DISABLE_COPY_ENGINE);
+        bool useMultipleCommandLists = !get_bool_envvar(ISPCRT_DISABLE_MULTI_COMMAND_LISTS);
         // No need to create copy queue if only one command list is requested.
         if (!is_mock_dev && isCopyEngineEnabled && useMultipleCommandLists) {
             // Discover all command queue groups
@@ -821,7 +1443,7 @@ struct TaskQueue : public ispcrt::base::TaskQueue {
                 queueGroupCount * sizeof(ze_command_queue_group_properties_t));
             zeDeviceGetCommandQueueGroupProperties(device, &queueGroupCount, queueGroupProperties);
 
-            if (queueGroupProperties != NULL) {
+            if (queueGroupProperties != nullptr) {
                 for (uint32_t i = 0; i < queueGroupCount; i++) {
                     if (queueGroupProperties[i].flags & ZE_COMMAND_QUEUE_GROUP_PROPERTY_FLAG_COMPUTE) {
                         computeOrdinal = i;
@@ -989,7 +1611,8 @@ struct TaskQueue : public ispcrt::base::TaskQueue {
                 // If there are commands in compute list, run sync of compute queue -
                 // it will ensure that dependent copy commands from host to device were executed before.
                 if (anyComputeCommand()) {
-                    L0_SAFE_CALL(zeCommandQueueSynchronize(m_q_compute->handle(), std::numeric_limits<uint64_t>::max()));
+                    L0_SAFE_CALL(
+                        zeCommandQueueSynchronize(m_q_compute->handle(), std::numeric_limits<uint64_t>::max()));
                 }
                 // If there are commands in copy to device commandlist only, run sync of copy queue.
                 else if (anyH2DCopyCommand()) {
@@ -1049,17 +1672,17 @@ struct TaskQueue : public ispcrt::base::TaskQueue {
     bool useCopyEngine{false};
 
     std::shared_ptr<CommandList> createCommandList(uint32_t ordinal) {
-        std::shared_ptr<CommandList> cmdl{ new CommandList(m_device, m_context, ordinal) };
+        std::shared_ptr<CommandList> cmdl{new CommandList(m_device, m_context, ordinal)};
         assert(cmdl.get());
         return cmdl;
     }
 
     std::shared_ptr<CommandQueue> createCommandQueue(uint32_t ordinal) {
-        std::shared_ptr<CommandQueue> cmdq{ new CommandQueue(m_device, m_context, ordinal) };
+        std::shared_ptr<CommandQueue> cmdq{new CommandQueue(m_device, m_context, ordinal)};
         return cmdq;
     }
 
-    void submit() override {
+    void submit() {
         m_cl_mem_h2d->submit(m_q_copy->handle());
         m_cl_compute->submit(m_q_compute->handle());
         m_cl_mem_d2h->submit(m_q_copy->handle());
@@ -1070,18 +1693,38 @@ struct TaskQueue : public ispcrt::base::TaskQueue {
     bool anyComputeCommand() { return m_events_compute_list.size(); }
 };
 
-// limitation: we assume that there'll be only one driver
-// for Intel devices
-static std::vector<ze_device_handle_t> g_deviceList;
+static std::vector<ze_driver_handle_t> g_driverList;
+static std::vector<std::pair<ze_driver_handle_t, ze_device_handle_t>> g_deviceList;
 
-static ze_driver_handle_t deviceDiscovery(bool *p_is_mock) {
-    static ze_driver_handle_t selectedDriver = nullptr;
-    bool is_mock = getenv_wr(ISPCRT_MOCK_DEVICE) != nullptr;
+static void deviceDiscovery(bool *p_is_mock) {
+    // Enable verbose if env var is set
+    is_verbose = get_bool_envvar(ISPCRT_VERBOSE);
+    if (UNLIKELY(is_verbose)) {
+        std::cout << "Verbose mode is on" << std::endl;
+        print_env(ISPCRT_VERBOSE);
+        print_env(ISPCRT_GPU_DRIVER);
+        print_env(ISPCRT_GPU_DEVICE);
+        print_env(ISPCRT_MOCK_DEVICE);
+        print_env(ISPCRT_GPU_THREAD_GROUP_SIZE_X);
+        print_env(ISPCRT_GPU_THREAD_GROUP_SIZE_Y);
+        print_env(ISPCRT_GPU_THREAD_GROUP_SIZE_Z);
+        print_env(ISPCRT_DISABLE_MULTI_COMMAND_LISTS);
+        print_env(ISPCRT_DISABLE_COPY_ENGINE);
+        print_env(ISPCRT_IGC_OPTIONS);
+        print_env(ISPCRT_USE_ZEBIN);
+        print_env(ISPCRT_MAX_KERNEL_LAUNCHES);
+        print_env(ISPCRT_MEM_POOL);
+        print_env(ISPCRT_MEM_POOL_MIN_CHUNK_POW2);
+        print_env(ISPCRT_MEM_POOL_MAX_CHUNK_POW2);
+    }
+
+    bool is_mock = get_bool_envvar(ISPCRT_MOCK_DEVICE);
 
     // Allow reinitialization of device list for mock device
-    if (!is_mock && selectedDriver != nullptr)
-        return selectedDriver;
+    if (!is_mock && !g_deviceList.empty())
+        return;
 
+    g_driverList.clear();
     g_deviceList.clear();
 
     // zeInit can be called multiple times
@@ -1105,19 +1748,43 @@ static ze_driver_handle_t deviceDiscovery(bool *p_is_mock) {
         std::vector<ze_device_handle_t> allDevices(deviceCount);
         L0_SAFE_CALL(zeDeviceGet(driver, &deviceCount, allDevices.data()));
         for (auto &device : allDevices) {
-            ze_device_properties_t device_properties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+            ze_device_properties_t device_properties{};
+            device_properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
             L0_SAFE_CALL(zeDeviceGetProperties(device, &device_properties));
             if (device_properties.type == ZE_DEVICE_TYPE_GPU && device_properties.vendorId == 0x8086) {
-                if (selectedDriver != nullptr && driver != selectedDriver)
-                    throw std::runtime_error("there should be only one Intel driver in the system");
-                selectedDriver = driver;
-                g_deviceList.push_back(device);
+                g_deviceList.push_back(std::make_pair(driver, device));
+                if (std::find(g_driverList.begin(), g_driverList.end(), driver) == g_driverList.end()) {
+                    g_driverList.push_back(driver);
+                }
             }
         }
     }
+
+    if (UNLIKELY(is_verbose)) {
+        std::cout << "Discovered Intel GPU drivers: " << g_driverList.size() << std::endl;
+        uint32_t driverIdx = 0;
+        uint32_t deviceIdx = 0;
+        ze_driver_handle_t prevDriver = g_deviceList[0].first;
+        for (const auto &dd : g_deviceList) {
+            ze_device_properties_t props{};
+            props.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+            L0_SAFE_CALL(zeDeviceGetProperties(dd.second, &props));
+
+            std::cout << "Driver (" << driverIdx << ") with device (" << deviceIdx << ") ";
+            std::cout << "deviceID: 0x" << std::hex << props.deviceId << std::dec;
+            std::cout << ", clock rate: " << props.coreClockRate << std::endl;
+
+            deviceIdx++;
+            if (prevDriver != dd.first) {
+                driverIdx++;
+                prevDriver = dd.first;
+            }
+        }
+    }
+
     if (p_is_mock != nullptr)
         *p_is_mock = is_mock;
-    return selectedDriver;
+    return;
 }
 
 uint32_t deviceCount() {
@@ -1130,8 +1797,9 @@ ISPCRTDeviceInfo deviceInfo(uint32_t deviceIdx) {
     if (deviceIdx >= g_deviceList.size())
         throw std::runtime_error("Invalid device number");
     ISPCRTDeviceInfo info;
-    ze_device_properties_t dp = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    L0_SAFE_CALL(zeDeviceGetProperties(g_deviceList[deviceIdx], &dp));
+    ze_device_properties_t dp{};
+    dp.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+    L0_SAFE_CALL(zeDeviceGetProperties(g_deviceList[deviceIdx].second, &dp));
     info.deviceId = dp.deviceId;
     info.vendorId = dp.vendorId;
     return info;
@@ -1139,13 +1807,13 @@ ISPCRTDeviceInfo deviceInfo(uint32_t deviceIdx) {
 
 void dynamicLinkModules(gpu::Module **modules, const uint32_t numModules) {
     std::vector<ze_module_handle_t> moduleHandles;
-    for (int i = 0; i < numModules; i++) {
+    for (uint32_t i = 0; i < numModules; i++) {
         moduleHandles.push_back(modules[i]->handle());
     }
 
     if (UNLIKELY(is_verbose)) {
         std::cout << "Binary linking of " << numModules << " modules: ";
-        for (int i = 0; i< numModules; i++) {
+        for (uint32_t i = 0; i < numModules; i++) {
             std::cout << modules[i]->filename() << " ";
         }
         std::cout << std::endl;
@@ -1165,15 +1833,16 @@ void dynamicLinkModules(gpu::Module **modules, const uint32_t numModules) {
     }
 }
 
-base::Module *staticLinkModules(gpu::Module **modules, const uint32_t numModules, ze_device_handle_t device, ze_context_handle_t context) {
+base::Module *staticLinkModules(gpu::Module **modules, const uint32_t numModules, ze_device_handle_t device,
+                                ze_context_handle_t context) {
     std::vector<ze_module_handle_t> moduleHandles;
-    for (int i = 0; i < numModules; i++) {
+    for (uint32_t i = 0; i < numModules; i++) {
         moduleHandles.push_back(modules[i]->handle());
     }
 
     if (UNLIKELY(is_verbose)) {
         std::cout << "vISA linking of " << numModules << " modules: ";
-        for (int i = 0; i< numModules; i++) {
+        for (uint32_t i = 0; i < numModules; i++) {
             std::cout << modules[i]->filename() << " ";
         }
         std::cout << std::endl;
@@ -1188,27 +1857,9 @@ base::Module *staticLinkModules(gpu::Module **modules, const uint32_t numModules
 // with most FLOPs or have some kind of load balancing)
 GPUDevice::GPUDevice() : GPUDevice(nullptr, nullptr, 0) {}
 
-GPUDevice::GPUDevice(void* nativeContext, void* nativeDevice, uint32_t deviceIdx) {
-    // Enable verbose if env var is set
-    is_verbose = getenv_wr(ISPCRT_VERBOSE) != nullptr;
-    if (UNLIKELY(is_verbose)) {
-        std::cout << "Verbose mode is on" << std::endl;
-        print_env(ISPCRT_VERBOSE);
-        print_env(ISPCRT_GPU_DEVICE);
-        print_env(ISPCRT_MOCK_DEVICE);
-        print_env(ISPCRT_GPU_THREAD_GROUP_SIZE_X);
-        print_env(ISPCRT_GPU_THREAD_GROUP_SIZE_Y);
-        print_env(ISPCRT_GPU_THREAD_GROUP_SIZE_Z);
-        print_env(ISPCRT_DISABLE_MULTI_COMMAND_LISTS);
-        print_env(ISPCRT_DISABLE_COPY_ENGINE);
-        print_env(ISPCRT_IGC_OPTIONS);
-        print_env(ISPCRT_USE_ZEBIN);
-        print_env(ISPCRT_MAX_KERNEL_LAUNCHES);
-        std::cout << "Device index " << deviceIdx << std::endl;
-    }
-
+GPUDevice::GPUDevice(void *nativeContext, void *nativeDevice, uint32_t deviceIdx) {
     // Perform GPU discovery
-    m_driver = gpu::deviceDiscovery(&m_is_mock);
+    gpu::deviceDiscovery(&m_is_mock);
 
     if (nativeDevice) {
         // Use the native device handler passed from app
@@ -1225,7 +1876,16 @@ GPUDevice::GPUDevice(void* nativeContext, void* nativeDevice, uint32_t deviceIdx
         if (gpuDeviceToGrab >= gpu::g_deviceList.size())
             throw std::runtime_error("could not find a valid GPU device");
 
-        m_device = gpu::g_deviceList[gpuDeviceToGrab];
+        std::pair<ze_driver_handle_t, ze_device_handle_t> p = gpu::g_deviceList[gpuDeviceToGrab];
+        m_driver = p.first;
+        m_device = p.second;
+
+        uint32_t gpuDriverIdx = get_number_envvar(ISPCRT_GPU_DRIVER, 0);
+        if (gpuDriverIdx >= gpu::g_driverList.size())
+            throw std::runtime_error("could not find a requested GPU driver");
+
+        if (m_driver != gpu::g_driverList[gpuDriverIdx])
+            throw std::runtime_error("the requested GPU driver don't provide the requested GPU device");
     }
 
     if (!m_device)
@@ -1250,15 +1910,27 @@ GPUDevice::~GPUDevice() {
         L0_SAFE_CALL_NOEXCEPT(zeContextDestroy((ze_context_handle_t)m_context));
 }
 
-base::MemoryView *GPUDevice::newMemoryView(void *appMem, size_t numBytes, bool shared) const {
-    return new gpu::MemoryView((ze_context_handle_t)m_context, (ze_device_handle_t)m_device, appMem, numBytes, shared);
+base::MemoryView *GPUDevice::newMemoryView(void *appMem, size_t numBytes, const ISPCRTNewMemoryViewFlags *flags) const {
+    return new gpu::MemoryView((ze_context_handle_t)m_context, (ze_device_handle_t)m_device, appMem, numBytes, flags,
+                               nullptr);
+}
+
+base::CommandQueue *GPUDevice::newCommandQueue(uint32_t ordinal) const {
+    return new gpu::CommandQueueImpl((ze_device_handle_t)m_device, (ze_context_handle_t)m_context, ordinal);
 }
 
 base::TaskQueue *GPUDevice::newTaskQueue() const {
     return new gpu::TaskQueue((ze_device_handle_t)m_device, (ze_context_handle_t)m_context, m_is_mock);
 }
 
-base::Module *GPUDevice::newModule(const char *moduleFile, const ISPCRTModuleOptions &opts) const {
+base::ModuleOptions *GPUDevice::newModuleOptions() const { return new gpu::ModuleOptions(); }
+
+base::ModuleOptions *GPUDevice::newModuleOptions(ISPCRTModuleType moduleType, bool libraryCompilation,
+                                                 uint32_t stackSize) const {
+    return new gpu::ModuleOptions(moduleType, libraryCompilation, stackSize);
+}
+
+base::Module *GPUDevice::newModule(const char *moduleFile, const base::ModuleOptions &opts) const {
     return new gpu::Module((ze_device_handle_t)m_device, (ze_context_handle_t)m_context, moduleFile, m_is_mock, opts);
 }
 
@@ -1267,7 +1939,8 @@ void GPUDevice::dynamicLinkModules(base::Module **modules, const uint32_t numMod
 }
 
 base::Module *GPUDevice::staticLinkModules(base::Module **modules, const uint32_t numModules) const {
-    return gpu::staticLinkModules((gpu::Module **)modules, numModules, (ze_device_handle_t)m_device, (ze_context_handle_t)m_context);
+    return gpu::staticLinkModules((gpu::Module **)modules, numModules, (ze_device_handle_t)m_device,
+                                  (ze_context_handle_t)m_context);
 }
 
 base::Kernel *GPUDevice::newKernel(const base::Module &module, const char *name) const {
@@ -1280,8 +1953,11 @@ void *GPUDevice::deviceNativeHandle() const { return m_device; }
 
 void *GPUDevice::contextNativeHandle() const { return m_context; }
 
+ISPCRTDeviceType GPUDevice::getType() const { return ISPCRT_DEVICE_TYPE_GPU; }
+
 ISPCRTAllocationType GPUDevice::getMemAllocType(void *appMemory) const {
-    ze_memory_allocation_properties_t memProperties = {ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES};
+    ze_memory_allocation_properties_t memProperties{};
+    memProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
     ze_device_handle_t gpuDevice = (ze_device_handle_t)m_device;
     L0_SAFE_CALL(zeMemGetAllocProperties((ze_context_handle_t)m_context, appMemory, &memProperties, &gpuDevice));
     switch (memProperties.type) {
@@ -1303,29 +1979,64 @@ GPUContext::GPUContext() : GPUContext(nullptr) {}
 
 GPUContext::GPUContext(void *nativeContext) {
     // Perform GPU discovery
-    m_driver = gpu::deviceDiscovery(&m_is_mock);
+    gpu::deviceDiscovery(&m_is_mock);
+
     if (nativeContext) {
         m_has_context_ownership = false;
         m_context = nativeContext;
     } else {
+        // Find an instance of Intel GPU driver
+        // User can select particular driver using env variable
+        // By default first available driver is selected
+        uint32_t gpuDriverIdx = get_number_envvar(ISPCRT_GPU_DRIVER, 0);
+        if (gpuDriverIdx >= gpu::g_driverList.size())
+            throw std::runtime_error("could not find a requested GPU driver");
+
+        m_driver = gpu::g_driverList[gpuDriverIdx];
+
         ze_context_desc_t contextDesc = {}; // use default values
         L0_SAFE_CALL(zeContextCreate((ze_driver_handle_t)m_driver, &contextDesc, (ze_context_handle_t *)&m_context));
+
+        if (UNLIKELY(is_verbose)) {
+            std::cout << "Created GPUContext for driver: " << gpuDriverIdx << std::endl;
+        }
     }
     if (!m_context)
         throw std::runtime_error("failed to create GPU context");
+
+    ze_context_handle_t ctxt = (ze_context_handle_t)m_context;
+    m_memPoolHWDR = std::unique_ptr<gpu::ChunkedPool>(new gpu::ChunkedPool(ISPCRT_SM_HOST_WRITE_DEVICE_READ, ctxt));
+    m_memPoolHRDW = std::unique_ptr<gpu::ChunkedPool>(new gpu::ChunkedPool(ISPCRT_SM_HOST_READ_DEVICE_WRITE, ctxt));
 }
 
 GPUContext::~GPUContext() {
+    // Destroy mem pools earlier than context, because context is used inside mem pools to deallocate memory.
+    m_memPoolHWDR.reset();
+    m_memPoolHRDW.reset();
     if (m_context && m_has_context_ownership)
         L0_SAFE_CALL_NOEXCEPT(zeContextDestroy((ze_context_handle_t)m_context));
 }
 
-base::MemoryView *GPUContext::newMemoryView(void *appMem, size_t numBytes, bool shared) const {
-    return new gpu::MemoryView((ze_context_handle_t)m_context, nullptr, appMem, numBytes, shared);
+base::MemoryView *GPUContext::newMemoryView(void *appMem, size_t numBytes,
+                                            const ISPCRTNewMemoryViewFlags *flags) const {
+    return new gpu::MemoryView((ze_context_handle_t)m_context, nullptr, appMem, numBytes, flags, this);
 }
 
 ISPCRTDeviceType GPUContext::getDeviceType() const { return ISPCRTDeviceType::ISPCRT_DEVICE_TYPE_GPU; }
 
 void *GPUContext::contextNativeHandle() const { return m_context; }
+
+gpu::ChunkedPool *GPUContext::memPool(ISPCRTSharedMemoryAllocationHint type) const {
+    switch (type) {
+    case ISPCRT_SM_HOST_DEVICE_READ_WRITE:
+        throw std::runtime_error("MemPool for shared memory with HOST_DEVICE_READ_WRITE is not supported");
+    case ISPCRT_SM_HOST_WRITE_DEVICE_READ:
+        return m_memPoolHWDR.get();
+    case ISPCRT_SM_HOST_READ_DEVICE_WRITE:
+        return m_memPoolHRDW.get();
+    default:
+        throw std::runtime_error("requested incorrect MemPool");
+    }
+}
 
 } // namespace ispcrt

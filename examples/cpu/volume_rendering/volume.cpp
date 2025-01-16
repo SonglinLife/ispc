@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2011-2014, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2011-2023, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 #ifdef _MSC_VER
@@ -51,6 +24,10 @@ extern void volume_serial(float density[], int nVoxels[3], const float raster2ca
 /* Write a PPM image file with the image */
 static void writePPM(float *buf, int width, int height, const char *fn) {
     FILE *fp = fopen(fn, "wb");
+    if (!fp) {
+        printf("Couldn't open a file '%s'\n", fn);
+        exit(1);
+    }
     fprintf(fp, "P6\n");
     fprintf(fp, "%d %d\n", width, height);
     fprintf(fp, "255\n");
@@ -113,6 +90,7 @@ static float *loadVolume(const char *fn, int n[3]) {
 
     if (fscanf(f, "%d %d %d", &n[0], &n[1], &n[2]) != 3) {
         fprintf(stderr, "Couldn't find resolution at start of density file\n");
+        fclose(f);
         exit(1);
     }
 
@@ -121,10 +99,12 @@ static float *loadVolume(const char *fn, int n[3]) {
     for (int i = 0; i < count; ++i) {
         if (fscanf(f, "%f", &v[i]) != 1) {
             fprintf(stderr, "Unexpected end of file at %d'th density value\n", i);
+            fclose(f);
             exit(1);
         }
     }
 
+    fclose(f);
     return v;
 }
 

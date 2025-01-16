@@ -1,48 +1,76 @@
 #
-#  Copyright (c) 2018-2022, Intel Corporation
-#  All rights reserved.
+#  Copyright (c) 2018-2025, Intel Corporation
 #
-#  Redistribution and use in source and binary forms, with or without
-#  modification, are permitted provided that the following conditions are
-#  met:
-#
-#    * Redistributions of source code must retain the above copyright
-#      notice, this list of conditions and the following disclaimer.
-#
-#    * Redistributions in binary form must reproduce the above copyright
-#      notice, this list of conditions and the following disclaimer in the
-#      documentation and/or other materials provided with the distribution.
-#
-#    * Neither the name of Intel Corporation nor the names of its
-#      contributors may be used to endorse or promote products derived from
-#      this software without specific prior written permission.
-#
-#
-#   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-#   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-#   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-#   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-#   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-#   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-#   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-#   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-#   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-#   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-#   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#  SPDX-License-Identifier: BSD-3-Clause
 
 #
 # ispc CMakeLists.txt
 #
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.15)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+
+# Set C++ standard to C++17.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+
+# Set C standard to C11
+set(CMAKE_C_STANDARD   11)
+set(CMAKE_C_STANDARD_REQUIRED   ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
 
 if (UNIX)
-    set(CMAKE_C_COMPILER "clang")
-    set(CMAKE_CXX_COMPILER "clang++")
+    if (NOT CMAKE_C_COMPILER)
+        set(CMAKE_C_COMPILER "clang")
+    endif()
+    if (NOT CMAKE_CXX_COMPILER)
+        set(CMAKE_CXX_COMPILER "clang++")
+    endif()
+endif()
+
+# Generate compile_commands.json by default - this enables VSCode to do better job interpretting
+# C++ files form the project.
+set(CMAKE_EXPORT_COMPILE_COMMANDS "ON" CACHE BOOL "Export compile commands")
+
+if (APPLE)
+    # Setting ISPC_MACOS_UNIVERSAL_BINARIES to ON is conventional way of building ISPC as Universal Binary.
+    # If cross compilation is needed (arm64->x86_64 or x86_64->arm64), specify CMAKE_OSX_ARCHITECTURES
+    # on the command line explicitly
+    option(ISPC_MACOS_UNIVERSAL_BINARIES "Build Universal Binaries on macOS" OFF)
+    if (ISPC_MACOS_UNIVERSAL_BINARIES)
+        message(STATUS "Building Universal Binaries (x86_64+arm64)")
+        set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "OSX architectures")
+    endif()
+
+    # We need to target different minimum macOS versions on x86 and arm by default, but before
+    # we execute project() command, the regular CMAKE_* variables with host info are not initialized,
+    # so we do this hack to detect the platform. It's not perfect, but good enough.
+    execute_process(COMMAND uname -m OUTPUT_VARIABLE UNAME)
+    if (UNAME MATCHES "x86_64" OR CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+        # Note: it's ok to have 10.12 for Universal Binaries.
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.12" CACHE STRING "Minimum macOS version to support")
+    else()
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version to support")
+    endif()
+    message(STATUS "Targeting minimum macOS version: ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+
 endif()
 
 set(PROJECT_NAME ispc)
 set(ISPC_BUILD TRUE)
 project(${PROJECT_NAME})
+
+## Check PIE support
+include(CheckPIESupported)
+check_pie_supported(OUTPUT_VARIABLE CHECK_PIE_OUTPUT LANGUAGES CXX)
+if(NOT CMAKE_CXX_LINK_PIE_SUPPORTED)
+    message(WARNING "PIE is not supported at link time: ${CHECK_PIE_OUTPUT}.\n"
+                    "PIE link options will not be passed to linker.")
+endif()
 
 set(X86_HOST FALSE)
 if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "amd64|AMD64|86")
@@ -59,10 +87,10 @@ option(ISPC_INCLUDE_TESTS "Generate build targets for the ISPC tests." ON)
 option(ISPC_INCLUDE_BENCHMARKS "Generate build targets for the ISPC tests." OFF)
 option(ISPC_INCLUDE_RT "Generate build targets for ISPC runtime." ON)
 option(ISPC_INCLUDE_UTILS "Generate build targets for the utils." ON)
+option(ISPC_INCLUDE_UTILS_ONLY "Generate build targets only for the utils." OFF)
 option(ISPC_PREPARE_PACKAGE "Generate build targets for ispc package" OFF)
-option(ISPC_NO_DUMPS "Turn off functionality, which requires LLVM dump() functions" OFF)
-
-option(ISPC_OPAQUE_PTR_MODE "Build ISPC with usage of opaque pointers" OFF)
+option(ISPC_PACKAGE_EXAMPLES "Pack examples into the ISPC package" ON)
+option(ISPC_SLIM_BINARY "Build ISPC as slim binary" OFF)
 
 option(ISPC_CROSS "Build ISPC with cross compilation support" OFF)
 # Default settings for cross compilation
@@ -121,6 +149,12 @@ else()
         set(ISPC_LINUX_TARGET ON)
     endif()
 endif()
+if (ISPC_LINUX_TARGET OR ISPC_ANDROID_TARGET OR ISPC_PS_TARGET
+    OR ISPC_FREEBSD_TARGET OR ISPC_IOS_TARGET OR ISPC_MACOS_TARGET)
+    set(ISPC_UNIX_TARGET ON)
+else()
+    set(ISPC_UNIX_TARGET OFF)
+endif()
 
 if (APPLE)
     # Use standard macOS SDK location if this is not specified.
@@ -131,6 +165,15 @@ if (APPLE)
             OUTPUT_STRIP_TRAILING_WHITESPACE
         )
         message(STATUS "Using macOS SDK path ${ISPC_MACOS_SDK_PATH}")
+    endif()
+
+    # Workaround CMake/CPack issue https://gitlab.kitware.com/cmake/cmake/-/issues/24601
+    # When llvm toolchain is presented in PATH, llvm-strip is preferred over
+    # macOS strip. However, CPack fails to correctly call llvm-strip because it
+    # adds flags like `-u` that are macOS strip specific.
+    # It may be removed later when CMake fixes ambiguity.
+    if (${CMAKE_VERSION} VERSION_LESS "3.27.0")
+        set(CMAKE_STRIP strip)
     endif()
 endif()
 
@@ -211,11 +254,30 @@ else(NOT CMAKE_BUILD_TYPE)
     message(STATUS "Build type not specified: Use Release by default.")
 endif(CMAKE_BUILD_TYPE)
 
+
+# Build target for utility checking host ISA
+if (ISPC_INCLUDE_UTILS)
+    add_executable(check_isa "")
+    target_sources(check_isa PRIVATE tools/check_isa.cpp)
+    set_target_properties(check_isa PROPERTIES FOLDER "Utils")
+    if (NOT ISPC_PREPARE_PACKAGE)
+        install (TARGETS check_isa DESTINATION bin)
+    endif()
+    if (ISPC_INCLUDE_UTILS_ONLY)
+        # Skip the below part of CMake. It is useful when only check_isa compiling is needed.
+        return()
+    endif()
+endif()
+
+set(BITCODE2CPP "${CMAKE_CURRENT_SOURCE_DIR}/scripts/bitcode2cpp.py")
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/ispcrt/cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FixWindowsPath.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindLLVM.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Git.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/CommonStdlibBuiltins.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateBuiltins.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenericTargets.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Stdlib.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.cmake)
 
@@ -259,53 +321,70 @@ find_package(FLEX 2.6 REQUIRED)
         )
     endif()
 
-set (ISPC_MASKS 1 8 16 32 64)
-
 if (NOT X86_ENABLED AND NOT ARM_ENABLED AND NOT WASM_ENABLED AND NOT XE_ENABLED)
     message( FATAL_ERROR "Either X86, ARM, WASM or XE targets need to be enabled.")
 endif ()
 
+# All possible ISPC targets
+list(APPEND X86_TARGETS
+    sse2-i32x4 sse2-i32x8
+    sse4-i32x4 sse4-i32x8 sse4-i8x16 sse4-i16x8
+    # Note here that avx1-i32x4 is aliased to sse4-i32x4 plus avx attribute,
+    # sse41* targets are aliased to corresponding sse4 targets.
+    avx1-i32x8 avx1-i32x16 avx1-i64x4
+    avx2-i8x32 avx2-i16x16
+    avx2-i32x4 avx2-i32x8 avx2-i32x16 avx2-i64x4
+    avx2vnni-i32x4 avx2vnni-i32x8 avx2vnni-i32x16
+    avx512skx-x4 avx512skx-x8 avx512skx-x16
+    avx512skx-x32 avx512skx-x64
+    avx512icl-x4 avx512icl-x8 avx512icl-x16
+    avx512icl-x32 avx512icl-x64
+    avx512spr-x4 avx512spr-x8 avx512spr-x16 avx512spr-x32 avx512spr-x64)
+
+# LLVM is removing support for Xeon Phi in 19.0
+if (${LLVM_VERSION_NUMBER} VERSION_LESS "19.0.0")
+    list(APPEND X86_TARGETS avx512knl-x16)
+endif()
+
+list(APPEND ARM_TARGETS neon-i8x16 neon-i16x8 neon-i32x4 neon-i32x8)
+list(APPEND WASM_TARGETS wasm-i32x4)
+list(APPEND XE_TARGETS gen9-x16 gen9-x8 xelp-x16 xelp-x8 xehpg-x16 xehpg-x8 xehpc-x16 xehpc-x32 xelpg-x16 xelpg-x8
+                       xe2hpg-x16 xe2hpg-x32 xe2lpg-x16 xe2lpg-x32)
+
 if (X86_ENABLED)
-    list(APPEND ISPC_TARGETS
-        sse2-i32x4 sse2-i32x8
-        sse4-i32x4 sse4-i32x8 sse4-i8x16 sse4-i16x8
-        # Note here that avx1-i32x4 is aliased to sse4-i32x4 plus avx attribute.
-        avx1-i32x8 avx1-i32x16 avx1-i64x4
-        avx2-i8x32 avx2-i16x16
-        avx2-i32x4 avx2-i32x8 avx2-i32x16 avx2-i64x4
-        avx512knl-x16
-        avx512skx-x4 avx512skx-x8 avx512skx-x16
-        avx512skx-x32 avx512skx-x64)
+    list(APPEND ISPC_TARGETS ${X86_TARGETS})
 endif()
 if (ARM_ENABLED)
-    list(APPEND ISPC_TARGETS neon-i8x16 neon-i16x8 neon-i32x4 neon-i32x8)
+    list(APPEND ISPC_TARGETS ${ARM_TARGETS})
 endif()
+if (WASM_ENABLED)
+    list(APPEND ISPC_TARGETS ${WASM_TARGETS})
+endif()
+if (XE_ENABLED)
+    list(APPEND ISPC_TARGETS ${XE_TARGETS})
+endif()
+
 if (WASM_ENABLED)
     find_program(EMCC_EXECUTABLE emcc)
     if (NOT EMCC_EXECUTABLE)
         message(FATAL_ERROR "emcc not found!")
     endif()
     message(STATUS "EMCC_EXECUTABLE: ${EMCC_EXECUTABLE}")
-    list(APPEND ISPC_TARGETS wasm-i32x4)
 endif()
 
-set(CLANG_LIBRARY_LIST clangFrontend clangDriver clangSerialization clangParse clangSema clangAnalysis clangAST clangBasic clangEdit clangLex)
-if (${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "15.0.0")
-    list(APPEND CLANG_LIBRARY_LIST clangSupport)
+if (${LLVM_VERSION_NUMBER} VERSION_LESS "17.0.0")
+    message(FATAL_ERROR "ISPC requires LLVM 17.0.0 or later")
 endif()
 
-set(LLVM_COMPONENTS engine ipo bitreader bitwriter instrumentation linker option frontendopenmp)
-if (XE_ENABLED AND ${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "14.0.0")
-    # passes component is required for SPIR-V usage.
-    list(APPEND LLVM_COMPONENTS passes)
-endif()
-if (${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "15.0.0")
-    # windowsdriver is a small library introduced in LLVM 15. While it's targeted at Windows only,
-    # it's used in the LLVM code without any ifdef and is needed on all platforms.
-    # An interesting fact, that on Linux it is not required, because linker is smart enough to optimize out
-    # the calls to unresolved symbols. It's not the case on macOS though.
-    list(APPEND LLVM_COMPONENTS windowsdriver)
-endif()
+set(CLANG_LIBRARY_LIST clangFrontend clangBasic clangEdit clangLex clangSupport clangASTMatchers)
+
+set(LLVM_COMPONENTS engine ipo bitreader bitwriter instrumentation linker option frontendopenmp passes)
+
+# windowsdriver is a small library introduced in LLVM 15. While it's targeted at Windows only,
+# it's used in the LLVM code without any ifdef and is needed on all platforms.
+# An interesting fact, that on Linux it is not required, because linker is smart enough to optimize out
+# the calls to unresolved symbols. It's not the case on macOS though.
+list(APPEND LLVM_COMPONENTS windowsdriver)
 
 if (X86_ENABLED)
     list(APPEND LLVM_COMPONENTS x86)
@@ -317,7 +396,6 @@ if (WASM_ENABLED)
     list(APPEND LLVM_COMPONENTS webassembly)
 endif()
 if (XE_ENABLED)
-    list(APPEND ISPC_TARGETS gen9-x16 gen9-x8 xelp-x16 xelp-x8 xehpg-x16 xehpg-x8 xehpc-x16 xehpc-x32)
     if(CMAKE_SIZEOF_VOID_P EQUAL 4)
         set(TARGET_MODIFIER "32")
         set(PB_PATH_MODIFIER "x86")
@@ -329,236 +407,367 @@ if (XE_ENABLED)
     list(APPEND XE_LIBRARY_LIST LLVMGenXIntrinsics LLVMSPIRVLib)
 endif()
 
-# Set the flag responsible for generation of opaque pointers in builtins
-set(ISPC_OPAQUE_FLAGS)
-if (ISPC_OPAQUE_PTR_MODE)
-    if (${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "15.0.0")
-    # Do nothing, opaque pointers mode is default
-    elseif (${LLVM_VERSION_NUMBER} VERSION_EQUAL "14.0.0")
-    # Explicitly enable opaque pointers for LLVM 14.0
-        set(ISPC_OPAQUE_FLAGS "-Xclang" "-opaque-pointers")
-    else()
-        message(FATAL_ERROR "ISPC opaque pointers mode is not supported with LLVM " ${LLVM_VERSION_NUMBER})
-    endif()
-else()
-    # Explicitly disable opaque pointers starting LLVM 15.0
-    if (${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "15.0.0")
-        set(ISPC_OPAQUE_FLAGS "-Xclang" "-no-opaque-pointers")
-    endif()
-endif()
-message(STATUS "ISPC opaque pointers mode is " ${ISPC_OPAQUE_PTR_MODE})
-
 get_llvm_libfiles(LLVM_LIBRARY_LIST ${LLVM_COMPONENTS})
 get_llvm_cppflags(LLVM_CPP_FLAGS)
 
-generate_target_builtins(BUILTIN_FILES ${ISPC_TARGETS})
-generate_common_builtins(BUILTIN_CPP_FILES)
-generate_stdlib(STDLIB_FILES ${ISPC_MASKS})
+if(CMAKE_GENERATOR MATCHES "Visual Studio")
+    # Visual Studio generator places binaries under bin/$(Configuration) subdirectory.
+    set(BITCODE_FOLDER ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/share/ispc)
+    set(INCLUDE_FOLDER ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/include)
+else()
+    set(BITCODE_FOLDER ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/ispc)
+    set(INCLUDE_FOLDER ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../include)
+endif()
+message(STATUS "BITCODE_FOLDER is ${BITCODE_FOLDER}")
+file(MAKE_DIRECTORY ${BITCODE_FOLDER})
 
-add_executable(${PROJECT_NAME} ${BUILTIN_FILES} ${BUILTIN_CPP_FILES}
-               ${STDLIB_FILES} ${BISON_CPP_OUTPUT} ${FLEX_OUTPUT}
-               ${CMAKE_CURRENT_SOURCE_DIR}/stdlib.ispc
-               ${CMAKE_CURRENT_SOURCE_DIR}/common/version.rc)
+# Defines builtin target
+generate_builtins()
 
-target_sources(${PROJECT_NAME}
-    PRIVATE
-        "src/ast.cpp"
-        "src/ast.h"
-        "src/bitcode_lib.cpp"
-        "src/bitcode_lib.h"
-        "src/builtins.cpp"
-        "src/builtins.h"
-        "src/ctx.cpp"
-        "src/ctx.h"
-        "src/decl.cpp"
-        "src/decl.h"
-        "src/expr.cpp"
-        "src/expr.h"
-        "src/func.cpp"
-        "src/func.h"
-        "src/ispc.cpp"
-        "src/ispc.h"
-        "src/ispc_version.h"
-        "src/llvmutil.cpp"
-        "src/llvmutil.h"
-        "src/main.cpp"
-        "src/module.cpp"
-        "src/module.h"
-        "src/opt.cpp"
-        "src/opt.h"
-        "src/stmt.cpp"
-        "src/stmt.h"
-        "src/sym.cpp"
-        "src/sym.h"
-        "src/target_enums.cpp"
-        "src/target_enums.h"
-        "src/target_registry.cpp"
-        "src/target_registry.h"
-        "src/type.cpp"
-        "src/type.h"
-        "src/util.cpp"
-        "src/util.h"
-        "src/parse.yy"
-        "src/lex.ll"
-        "common/version.h"
+# Common sources between ispc-opt and ispc
+list(APPEND COMMON_SOURCES
+    common/version.rc
+    common/version.h
+    src/bitcode_lib.cpp
+    src/bitcode_lib.h
+    src/builtins-decl.cpp
+    src/builtins-decl.h
+    src/ispc.cpp
+    src/ispc.h
+    src/ispc_version.h
+    src/llvmutil.cpp
+    src/llvmutil.h
+    src/target_enums.cpp
+    src/target_enums.h
+    src/target_registry.cpp
+    src/target_registry.h
+    src/util.cpp
+    src/util.h
 )
 
-# ISPC passes
-add_subdirectory(src/opt)
+# Source files used only in ispc
+list(APPEND FRONTEND_SOURCES
+    ${STDLIB_FILES}
+    ${BISON_CPP_OUTPUT}
+    ${FLEX_OUTPUT}
+    ${CMAKE_CURRENT_SOURCE_DIR}/stdlib/stdlib.ispc
+    src/ast.cpp
+    src/ast.h
+    src/builtins.cpp
+    src/builtins.h
+    src/ctx.cpp
+    src/ctx.h
+    src/decl.cpp
+    src/decl.h
+    src/expr.cpp
+    src/expr.h
+    src/func.cpp
+    src/func.h
+    src/intrinsics.cpp
+    src/module.cpp
+    src/module.h
+    src/stmt.cpp
+    src/stmt.h
+    src/sym.cpp
+    src/sym.h
+    src/type.cpp
+    src/type.h
+    src/parse.yy
+    src/lex.ll
+)
+
+# ISPC optimization passes shared between ispc and ispc-opt
+list(APPEND OPT_SOURCES
+    src/opt.cpp
+    src/opt.h
+    src/opt/CheckIRForXeTarget.cpp
+    src/opt/CheckIRForXeTarget.h
+    src/opt/GatherCoalescePass.cpp
+    src/opt/GatherCoalescePass.h
+    src/opt/IsCompileTimeConstant.cpp
+    src/opt/IsCompileTimeConstant.h
+    src/opt/ImproveMemoryOps.cpp
+    src/opt/ImproveMemoryOps.h
+    src/opt/InstructionSimplify.cpp
+    src/opt/InstructionSimplify.h
+    src/opt/IntrinsicsOptPass.cpp
+    src/opt/IntrinsicsOptPass.h
+    src/opt/LowerISPCIntrinsics.cpp
+    src/opt/LowerISPCIntrinsics.h
+    src/opt/MangleOpenCLBuiltins.cpp
+    src/opt/MangleOpenCLBuiltins.h
+    src/opt/PeepholePass.cpp
+    src/opt/PeepholePass.h
+    src/opt/RemovePersistentFuncs.cpp
+    src/opt/RemovePersistentFuncs.h
+    src/opt/ReplaceMaskedMemOps.cpp
+    src/opt/ReplaceMaskedMemOps.h
+    src/opt/ReplacePseudoMemoryOps.cpp
+    src/opt/ReplacePseudoMemoryOps.h
+    src/opt/ReplaceStdlibShiftPass.cpp
+    src/opt/ReplaceStdlibShiftPass.h
+    src/opt/ScalarizePass.cpp
+    src/opt/ScalarizePass.h
+    src/opt/XeGatherCoalescePass.cpp
+    src/opt/XeGatherCoalescePass.h
+    src/opt/XeReplaceLLVMIntrinsics.cpp
+    src/opt/XeReplaceLLVMIntrinsics.h
+)
+
+set(STDLIB_HEADERS core.isph stdlib.isph)
+set(ALL_STDLIB_HEADERS
+  builtins.isph
+  core.isph
+  stdlib.isph
+  svml.isph
+  target.isph
+)
+set(STDLIB_ISPC_FILES stdlib/stdlib.ispc)
+foreach (header ${ALL_STDLIB_HEADERS})
+    list(APPEND STDLIB_ISPC_FILES stdlib/include/${header})
+endforeach()
 
 # To show stdlib.ispc in VS solution:
 if (WIN32)
-    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/stdlib.ispc" PROPERTIES HEADER_FILE_ONLY TRUE)
-    source_group("ISPC" FILES "${CMAKE_CURRENT_SOURCE_DIR}/stdlib.ispc")
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/stdlib/stdlib.ispc" PROPERTIES HEADER_FILE_ONLY TRUE)
+    source_group("ISPC" FILES "${CMAKE_CURRENT_SOURCE_DIR}/stdlib/stdlib.ispc")
 endif()
 
 # Build definitions
-target_compile_definitions(${PROJECT_NAME} PRIVATE ${LLVM_VERSION})
-string(TIMESTAMP BUILD_DATE "%Y%m%d")
-target_compile_definitions(${PROJECT_NAME} PRIVATE BUILD_DATE=\"${BUILD_DATE}\"
-                                                   BUILD_VERSION=\"${GIT_COMMIT_HASH}\")
+string(TIMESTAMP BUILD_DATE "%Y%m%d" UTC)
+list(APPEND COMPILE_DEFINITIONS
+    BUILD_DATE=\"${BUILD_DATE}\"
+    BUILD_VERSION=\"${GIT_COMMIT_HASH}\"
+)
 if (UNIX)
-    # Compile-time protection against static sized buffer overflows.
-    target_compile_definitions(${PROJECT_NAME} PRIVATE "_FORTIFY_SOURCE=2")
+    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        # Compile-time protection against static sized buffer overflows.
+        list(APPEND COMPILE_DEFINITIONS _FORTIFY_SOURCE=2)
+    endif()
 else()
-    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
-    if (NOT CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
-        target_compile_definitions(${PROJECT_NAME} PRIVATE NDEBUG)
+    list(APPEND COMPILE_DEFINITIONS NOMINMAX)
+    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        list(APPEND COMPILE_DEFINITIONS NDEBUG)
     endif()
 endif()
 
+# TODO: It may be confusing that some CMake variables start with ISPC but some
+# not. It can be also useful to have same name for CMake var and the
+# corresponding macro definition. It is not clear why it make sense to have
+# different ones.
 if (X86_ENABLED)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_X86_ENABLED)
+    list(APPEND COMPILE_DEFINITIONS ISPC_X86_ENABLED)
 endif()
 
 if (ARM_ENABLED)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_ARM_ENABLED)
+    list(APPEND COMPILE_DEFINITIONS ISPC_ARM_ENABLED)
 endif()
 
 if (XE_ENABLED)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_XE_ENABLED)
+    list(APPEND COMPILE_DEFINITIONS ISPC_XE_ENABLED)
 endif()
 
 if (WASM_ENABLED)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_WASM_ENABLED)
-endif()
-
-if (ISPC_NO_DUMPS)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_NO_DUMPS)
+    list(APPEND COMPILE_DEFINITIONS ISPC_WASM_ENABLED)
 endif()
 
 # Compile definitions for cross compilation
-if (NOT ISPC_WINDOWS_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_WINDOWS_TARGET_OFF)
+if (ISPC_WINDOWS_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_WINDOWS_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_WINDOWS_TARGET_OFF)
 endif()
-if (NOT ISPC_LINUX_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_LINUX_TARGET_OFF)
+if (ISPC_LINUX_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_LINUX_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_LINUX_TARGET_OFF)
 endif()
-if (NOT ISPC_FREEBSD_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_FREEBSD_TARGET_OFF)
+if (ISPC_FREEBSD_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_FREEBSD_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_FREEBSD_TARGET_OFF)
 endif()
-if (NOT ISPC_MACOS_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_MACOS_TARGET_OFF)
+if (ISPC_MACOS_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_MACOS_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_MACOS_TARGET_OFF)
 endif()
-if (NOT ISPC_IOS_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_IOS_TARGET_OFF)
+if (ISPC_IOS_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_IOS_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_IOS_TARGET_OFF)
 endif()
-if (NOT ISPC_ANDROID_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_ANDROID_TARGET_OFF)
+if (ISPC_ANDROID_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_ANDROID_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_ANDROID_TARGET_OFF)
 endif()
-if (NOT ISPC_PS_TARGET)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_PS_TARGET_OFF)
+if (ISPC_PS_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_PS_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_PS_TARGET_OFF)
+endif()
+if (ISPC_UNIX_TARGET)
+    list(APPEND COMPILE_DEFINITIONS ISPC_UNIX_TARGET_ON)
+else()
+    list(APPEND COMPILE_DEFINITIONS ISPC_UNIX_TARGET_OFF)
 endif()
 
-# Compile definition for opaque pointers mode
-if (ISPC_OPAQUE_PTR_MODE)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ISPC_OPAQUE_PTR_MODE)
-endif()
 
 # Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE
-                           ${LLVM_INCLUDE_DIRS}
-                           ${XE_DEPS_DIR}/include
-                           ${CMAKE_CURRENT_SOURCE_DIR}/src
-                           ${CMAKE_CURRENT_SOURCE_DIR}/common
-                           ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR})
+list(APPEND INCLUDE_DIRECTORIES
+    ${LLVM_INCLUDE_DIRS}
+    ${XE_DEPS_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/common
+    ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}
+    ${CMAKE_BINARY_DIR}
+)
 
+list(APPEND COMPILE_OPTIONS)
 # Compile options
 if (MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W3 /wd4018 /wd4065 /wd4141 /wd4146 /wd4244 /wd4267 /wd4291 /wd4355 /wd4624 /wd4800 /wd4996)
+    list(APPEND COMPILE_OPTIONS
+        /W3
+        /wd4018
+        /wd4146
+        /wd4244
+        /wd4267
+        /wd4624
+        /wd4996
+    )
     # Security options
-    target_compile_options(${PROJECT_NAME} PRIVATE /GS)
-    set_source_files_properties(${FLEX_OUTPUT} PROPERTIES COMPILE_FLAGS "/wd4005 /wd4003")
-    set_source_files_properties(${BISON_OUTPUT} PROPERTIES COMPILE_FLAGS "/wd4005 /wd4065")
+    list(APPEND COMPILE_OPTIONS
+        /GS
+        /EHsc
+    )
+    set_source_files_properties(${FLEX_OUTPUT} PROPERTIES COMPILE_FLAGS /wd4005)
+    set_source_files_properties(${BISON_OUTPUT} PROPERTIES COMPILE_FLAGS /wd4005)
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wno-sign-compare -Wno-unused-function ${LLVM_CPP_FLAGS})
-    # Security options
-    target_compile_options(${PROJECT_NAME} PRIVATE -fstack-protector-strong
-                           -fdata-sections -ffunction-sections -fno-delete-null-pointer-checks
-                           -Wformat -Wformat-security -fpie -fwrapv)
-    # LLVM 14 switches default DWARF version from v4 to v5
+    list(APPEND COMPILE_OPTIONS
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+        -Wno-sign-compare
+        -Wno-unused-function
+        ${LLVM_CPP_FLAGS}
+    )
+    # Security options for both Debug and Release builds
+    list(APPEND COMPILE_OPTIONS
+        -fstack-protector-strong
+        -fno-delete-null-pointer-checks
+        -Wformat
+        -Wformat-security
+        -fwrapv
+    )
+    # Additional security options for Release mode
+    # Should be combined with link-time optimization (-Wl,--gc-sections during the linking phase)
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        list(APPEND COMPILE_OPTIONS
+            -fdata-sections
+            -ffunction-sections
+        )
+    endif()
+    # Since 14.0 LLVM has switched default DWARF version from v4 to v5
     # but gdb < 10.1 can't read DWARF v5.
     # https://discourse.llvm.org/t/gdb-10-1-cant-read-clangs-dwarf-v5/6035
     # Use DWARF v4 for ISPC build to allow debugging of ispc binary with gdb
     # on Ubuntu 20.04
-    if (NOT CMAKE_BUILD_TYPE STREQUAL "Release" AND ${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "14.0.0")
-        target_compile_options(${PROJECT_NAME} PRIVATE -gdwarf-4)
+    if (NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+        list(APPEND COMPILE_OPTIONS -gdwarf-4)
     endif()
 endif()
 
-# Set C++ standard to C++17.
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED YES)
 
 if (NOT MSVC)
-    set_target_properties(${PROJECT_NAME} PROPERTIES CXX_EXTENSIONS OFF)
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wno-c99-extensions -Wno-deprecated-register -fno-rtti)
+    list(APPEND COMPILE_OPTIONS -fno-rtti)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        list(APPEND COMPILE_OPTIONS
+            -Wno-register
+            -Wno-error=comment
+        )
+        # The GCC warning issues false positives when one of the allocation and
+        # deallocation functions is inlined into its caller but not the other.
+        list(APPEND COMPILE_OPTIONS -Wno-mismatched-new-delete)
+    else()
+        list(APPEND COMPILE_OPTIONS
+            -Wno-c99-extensions
+            -Wno-deprecated-register
+        )
+    endif()
     if (ISPC_USE_ASAN)
-        target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address)
+        list(APPEND COMPILE_OPTIONS -fsanitize=address)
     endif()
 endif()
 
+
+list(APPEND LINK_OPTIONS_PRIVATE)
+list(APPEND LINK_OPTIONS_PUBLIC)
 # Link options
 if (WIN32)
-    target_link_options(${PROJECT_NAME} PRIVATE /DYNAMICBASE)
+    list(APPEND LINK_OPTIONS_PRIVATE /DYNAMICBASE)
     # Control flow guard
-    target_link_options(${PROJECT_NAME} PRIVATE /GUARD:CF)
+    list(APPEND LINK_OPTIONS_PRIVATE /GUARD:CF)
+    # When resolving statically linked import dependencies of the module, limit
+    # the module search path to %windows%\system32 directory only.
+    list(APPEND LINK_OPTIONS_PRIVATE /DEPENDENTLOADFLAG:0x800)
     if (MSVC AND NOT CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
-        target_link_options(${PROJECT_NAME} PUBLIC /OPT:REF /OPT:ICF)
+        list(APPEND LINK_OPTIONS_PUBLIC /OPT:REF /OPT:ICF)
     endif()
 elseif (APPLE)
+    if(CMAKE_BUILD_TYPE MATCHES Release)
+        list(APPEND LINK_OPTIONS_PUBLIC "SHELL: -Wl,-dead_strip")
+    endif()
 else()
-    # Link options for security hardening.
-    target_link_options(${PROJECT_NAME}
-        PUBLIC "SHELL: -z noexecstack"
-               "SHELL: -z relro"
-               "SHELL: -z now"
-               "SHELL: -Wl,--gc-sections")
+    # Common security hardening options for both Debug and Release
+    list(APPEND LINK_OPTIONS_PUBLIC
+        "SHELL: -z noexecstack"
+        "SHELL: -z relro"
+        "SHELL: -z now"
+    )
+    # Additional options for Release mode
+    if(CMAKE_BUILD_TYPE MATCHES Release)
+        list(APPEND LINK_OPTIONS_PUBLIC "SHELL: -Wl,--gc-sections")
+    endif()
 endif()
 
 if (ISPC_STATIC_STDCXX_LINK OR ISPC_STATIC_LINK)
-    target_link_options(${PROJECT_NAME} PUBLIC -static-libgcc -static-libstdc++)
+    list(APPEND LINK_OPTIONS_PUBLIC
+        -static-libgcc
+        -static-libstdc++
+    )
 endif()
 
 if (ISPC_USE_ASAN)
-    target_link_options(${PROJECT_NAME} PUBLIC -fsanitize=address)
+    list(APPEND LINK_OPTIONS_PUBLIC -fsanitize=address)
 endif()
 
+
+list(APPEND LINK_LIBRARIES)
 if (NOT WIN32 AND NOT APPLE)
     # To resolve circular dependencies between libraries use --start-group/--end-group
-    target_link_libraries(${PROJECT_NAME} "-Wl,--start-group")
+    list(APPEND LINK_LIBRARIES "-Wl,--start-group")
 endif()
 
 # Link against Clang libraries
 foreach(clangLib ${CLANG_LIBRARY_LIST})
-    find_library(${clangLib}Path NAMES ${clangLib} HINTS ${LLVM_LIBRARY_DIRS})
-    list(APPEND CLANG_LIBRARY_FULL_PATH_LIST ${${clangLib}Path})
+    # Preferred way to build ISPC is to link it with individual clang static
+    # libraries. However, when they omitted it can be link with shared library
+    # libclang-cpp.so. Second approach would be utilized in some controlled
+    # environments, like in package managers for particular OSes (issue 2418).
+    find_library(${clangLib}Path
+                 NAMES
+                    "${CMAKE_STATIC_LIBRARY_PREFIX}${clangLib}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+                    clang-cpp
+                 HINTS ${LLVM_LIBRARY_DIRS})
+    if (NOT ${${clangLib}Path} IN_LIST CLANG_LIBRARY_FULL_PATH_LIST)
+        list(APPEND CLANG_LIBRARY_FULL_PATH_LIST ${${clangLib}Path})
+    endif()
 endforeach()
-target_link_libraries(${PROJECT_NAME} ${CLANG_LIBRARY_FULL_PATH_LIST})
+list(APPEND LINK_LIBRARIES ${CLANG_LIBRARY_FULL_PATH_LIST})
 
 # Link against LLVM libraries
-target_link_libraries(${PROJECT_NAME} ${LLVM_LIBRARY_LIST} ${CMAKE_DL_LIBS})
+list(APPEND LINK_LIBRARIES ${LLVM_LIBRARY_LIST} ${CMAKE_DL_LIBS})
 
 if (XE_ENABLED)
     # Link against Xe libraries
@@ -566,38 +775,130 @@ if (XE_ENABLED)
         find_library(${xeLib}Path NAMES ${xeLib} HINTS ${XE_DEPS_DIR}/lib)
         list(APPEND XE_LIBRARY_FULL_PATH_LIST ${${xeLib}Path})
     endforeach()
-    target_link_libraries(${PROJECT_NAME} ${XE_LIBRARY_FULL_PATH_LIST})
+    list(APPEND LINK_LIBRARIES ${XE_LIBRARY_FULL_PATH_LIST})
 endif()
 
 if (NOT WIN32 AND NOT APPLE)
-    target_link_libraries(${PROJECT_NAME} "-Wl,--end-group")
+    list(APPEND LINK_LIBRARIES "-Wl,--end-group")
 endif()
 
 # System libraries, our own and transitive dependencies from LLVM libs.
 if (WIN32)
-    target_link_libraries(${PROJECT_NAME} version.lib shlwapi.lib odbc32.lib odbccp32.lib)
+    list(APPEND LINK_LIBRARIES version.lib shlwapi.lib odbc32.lib odbccp32.lib)
+    # Required after LLVM commit a5ffabc
+    if (${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "18.1.0")
+        list(APPEND LINK_LIBRARIES ws2_32.lib)
+    endif()
+    # Required after LLVM commit cb7690a
+    if (${LLVM_VERSION_NUMBER} VERSION_GREATER_EQUAL "19.1.0")
+        list(APPEND LINK_LIBRARIES ntdll.lib)
+    endif()
 else()
-    if (ISPC_STATIC_LINK)
-        target_link_libraries(${PROJECT_NAME} pthread tinfo.a curses.a)
-    else()
-        find_package(Curses REQUIRED)
-        if (CURSES_EXTRA_LIBRARY)
-            # this contains the tinfo library, if found
-            target_link_libraries(${PROJECT_NAME} ${CURSES_EXTRA_LIBRARY})
-        endif()
-        target_link_libraries(${PROJECT_NAME} pthread ${CURSES_CURSES_LIBRARY})
+    run_llvm_config(LLVM_SYSTEM_LIBS "--system-libs")
+    if (LLVM_SYSTEM_LIBS MATCHES "pthread")
+        # ISPC doesn't use pthreads directly, but some LLVM does. Although, it
+        # looks like we do not use LLVM code that depend on pthreads, don't we?
+        find_library(PTHREAD_LIB REQUIRED NAMES pthread)
+        message(STATUS "Link with pthread library ${PTHREAD_LIB}")
+        list(APPEND LINK_LIBRARIES ${PTHREAD_LIB})
+    endif()
+    if (LLVM_SYSTEM_LIBS MATCHES "tinfo" OR LLVM_SYSTEM_LIBS MATCHES "curses")
+        find_library(TINFO_LIB REQUIRED NAMES terminfo tinfo curses ncurses ncursesw)
+        message(STATUS "Link with tinfo library ${TINFO_LIB}")
+        list(APPEND LINK_LIBRARIES ${TINFO_LIB})
     endif()
 endif()
 
-# Build target for utility checking host ISA
-if (ISPC_INCLUDE_UTILS)
-    add_executable(check_isa "")
-    target_sources(check_isa PRIVATE check_isa.cpp)
-    set_target_properties(check_isa PROPERTIES FOLDER "Utils")
-    if (NOT ISPC_PREPARE_PACKAGE)
-        install (TARGETS check_isa DESTINATION bin)
+# This function configures compile definitions, options and include dirs.
+# It can be used for any objects or libraries that are built in the project.
+function(configure_ispc_obj TARGET)
+    target_compile_definitions(${TARGET} PRIVATE ${COMPILE_DEFINITIONS})
+    target_include_directories(${TARGET} PRIVATE ${INCLUDE_DIRECTORIES})
+    target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
+
+    # Set hidden visibility for inline functions. This is needed to be in sync
+    # with LLVM libraries, we do include some template code from LLVM that requires
+    # this options to be in sync with LLVM. Otherwise it causes link warnings.
+    set_target_properties(${TARGET} PROPERTIES VISIBILITY_INLINES_HIDDEN ON)
+    if (NOT MSVC)
+        set_target_properties(${TARGET} PROPERTIES CXX_EXTENSIONS OFF)
     endif()
+endfunction()
+
+# This function configures executable targets.
+function(configure_ispc_exe TARGET)
+    configure_ispc_obj(${TARGET})
+    target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS_PRIVATE})
+    target_link_options(${TARGET} PUBLIC ${LINK_OPTIONS_PUBLIC})
+endfunction()
+
+# This function creates and configures ispc-slim executable target under the given NAME.
+function(add_ispc_slim NAME)
+    # Defines stdlib target
+    generate_stdlibs(${NAME})
+
+    # Defines targets for generic builtin implementations
+    generate_generic_builtins(${NAME})
+
+    # stdlib, stdlibs-bc, stdlibs-cpp targets are created in Stdlib.cmake
+    configure_ispc_obj(stdlib)
+
+    add_executable(${NAME} src/main.cpp src/binary_slim.cpp)
+    configure_ispc_exe(${NAME})
+    target_link_libraries(${NAME} ${LINK_LIBRARIES} optimization common frontend)
+    add_dependencies(${NAME} builtins-bc)
+    add_dependencies(generic-target-bc ${NAME})
+    add_dependencies(stdlibs-bc generic-stdlib-bc)
+    if (${NAME} STREQUAL "ispc")
+        set_target_properties(generic-target-bc PROPERTIES EXCLUDE_FROM_ALL OFF)
+        set_target_properties(generic-stdlib-bc PROPERTIES EXCLUDE_FROM_ALL OFF)
+        set_target_properties(stdlibs-bc PROPERTIES EXCLUDE_FROM_ALL OFF)
+    endif()
+endfunction()
+
+# Define libraries that are built in the project. Some of them are shared across multiple executable targets.
+add_library(optimization OBJECT EXCLUDE_FROM_ALL ${OPT_SOURCES})
+configure_ispc_obj(optimization)
+
+add_library(common OBJECT EXCLUDE_FROM_ALL ${COMMON_SOURCES})
+configure_ispc_obj(common)
+
+add_library(frontend OBJECT EXCLUDE_FROM_ALL ${FRONTEND_SOURCES})
+configure_ispc_obj(frontend)
+
+# builtin target is created in GenerateBuiltins.cmake
+configure_ispc_obj(builtin)
+
+# Define executable targets
+add_executable(ispc-opt tools/ispc-opt.cpp)
+configure_ispc_exe(ispc-opt)
+# TODO! should we link against all the same LLVM/Clang libraries? Clang libs is definetely not needed
+target_link_libraries(ispc-opt ${LINK_LIBRARIES} builtin optimization common)
+
+# The final target has to be ispc due to two use-cases we do not want to
+# interfere with: make ispc and $<TARGET_FILE:ispc>.
+if (ISPC_SLIM_BINARY)
+    add_ispc_slim(ispc)
+    message(STATUS "ISPC will be built as a slim binary")
+else()
+    add_ispc_slim(ispc-slim)
+    configure_ispc_obj(generic-target)
+
+    add_executable(ispc src/main.cpp src/binary_composite.cpp)
+    configure_ispc_exe(ispc)
+    target_link_libraries(ispc ${LINK_LIBRARIES} builtin stdlib optimization common frontend generic-target)
+    add_dependencies(ispc ispc-slim)
+    message(STATUS "ISPC will be built as a composite binary")
 endif()
+
+install (TARGETS ispc DESTINATION bin)
+if (ISPC_SLIM_BINARY)
+    foreach (header ${STDLIB_HEADERS})
+        install (FILES "stdlib/include/${header}" DESTINATION include)
+    endforeach()
+    install(DIRECTORY ${BITCODE_FOLDER} DESTINATION share)
+endif()
+
 
 if (ISPC_INCLUDE_TESTS)
     add_subdirectory(tests)
@@ -612,11 +913,16 @@ if (ISPC_INCLUDE_RT)
     add_subdirectory(ispcrt)
 endif()
 
+if (NOT X86_ENABLED)
+    # examples use x86 targets
+    set(ISPC_INCLUDE_EXAMPLES OFF)
+endif()
+
 if (ISPC_INCLUDE_EXAMPLES AND NOT ISPC_PREPARE_PACKAGE)
     include(ExternalProject)
     ExternalProject_Add(ispc_cpu_examples
         PREFIX cpu_examples
-        DEPENDS ispc
+        DEPENDS ispc stdlibs-bc stdlib-headers
         SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/examples/cpu"
         CMAKE_CACHE_ARGS
             -DISPC_BUILD:BOOL=TRUE
@@ -642,7 +948,7 @@ if (ISPC_INCLUDE_XE_EXAMPLES AND ISPC_INCLUDE_RT AND NOT ISPC_PREPARE_PACKAGE)
         # using cmake generator conditional expressions were unsuccessful.
         ExternalProject_Add(ispc_xpu_examples
             PREFIX xpu_examples
-            DEPENDS ispc ispcrt benchmark
+            DEPENDS ispc stdlibs-bc stdlib-headers ispcrt benchmark
             SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/examples/xpu"
             CMAKE_CACHE_ARGS
                 -DISPC_BUILD:BOOL=TRUE
@@ -662,7 +968,7 @@ if (ISPC_INCLUDE_XE_EXAMPLES AND ISPC_INCLUDE_RT AND NOT ISPC_PREPARE_PACKAGE)
     else()
         ExternalProject_Add(ispc_xpu_examples
             PREFIX xpu_examples
-            DEPENDS ispc ispcrt
+            DEPENDS ispc stdlibs-bc stdlib-headers ispcrt
             SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/examples/xpu"
             CMAKE_CACHE_ARGS
                 -DISPC_BUILD:BOOL=TRUE
@@ -680,13 +986,13 @@ if (ISPC_INCLUDE_XE_EXAMPLES AND ISPC_INCLUDE_RT AND NOT ISPC_PREPARE_PACKAGE)
     endif()
 endif()
 
-# Install
-install (TARGETS ${PROJECT_NAME} DESTINATION bin)
 if (ISPC_PREPARE_PACKAGE)
-    if (XE_ENABLED)
-        install (DIRECTORY "${PROJECT_SOURCE_DIR}/examples/" DESTINATION examples)
-    else()
-        install (DIRECTORY "${PROJECT_SOURCE_DIR}/examples/" DESTINATION examples PATTERN "xpu" EXCLUDE)
+    if (ISPC_PACKAGE_EXAMPLES)
+        if (XE_ENABLED)
+            install (DIRECTORY "${PROJECT_SOURCE_DIR}/examples/" DESTINATION examples)
+        else()
+            install (DIRECTORY "${PROJECT_SOURCE_DIR}/examples/" DESTINATION examples PATTERN "xpu" EXCLUDE)
+        endif()
     endif()
     install (DIRECTORY "${PROJECT_SOURCE_DIR}/contrib/" DESTINATION contrib)
     install (FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION .)
@@ -715,12 +1021,15 @@ if (ISPC_PREPARE_PACKAGE)
 
     # CPack configuration
     if (WIN32)
-        set(CPACK_GENERATOR "WIX" "ZIP")
+        set(CPACK_GENERATOR "ZIP")
         set(ISPC_SYSTEM_NAME "windows")
+        # WIX generator is currently turned off.
+        # To turn it on uncomment code below:
+        # set(CPACK_GENERATOR "WIX" "ZIP")
+        # set(CPACK_WIX_UPGRADE_GUID "EDD858F2-19B0-4E5B-B9B9-2A09B85D451C")
+        # set(CPACK_WIX_CMAKE_PACKAGE_REGISTRY "ISPC")
         # WIX generator expects version in format x.y.z where x, y, z are numbers
         set(CPACK_PACKAGE_VERSION "${ISPC_VERSION_MAJOR}.${ISPC_VERSION_MINOR}.${ISPC_VERSION_PATCH}")
-        set(CPACK_WIX_UPGRADE_GUID "EDD858F2-19B0-4E5B-B9B9-2A09B85D451C")
-        set(CPACK_WIX_CMAKE_PACKAGE_REGISTRY "ISPC")
     else()
         set(CPACK_GENERATOR "TGZ")
         if (APPLE)
@@ -738,19 +1047,53 @@ if (ISPC_PREPARE_PACKAGE)
     set(CPACK_PACKAGE_VERSION_PATCH ${ISPC_VERSION_PATCH}${ISPC_VERSION_SUFFIX})
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
     set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+
+    # Sign files in the package if ISPC_SIGN_KEY is set
+    if (DEFINED ISPC_SIGN_KEY)
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Signing.cmake.in"
+                       "${CMAKE_CURRENT_BINARY_DIR}/Signing.cmake" @ONLY)
+        set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_CURRENT_BINARY_DIR}/Signing.cmake")
+    endif()
     # Allow use custom package name with -DISPC_PACKAGE_NAME
     if (NOT ISPC_PACKAGE_NAME)
+        set(ISPC_ARCH_SUFFIX)
+        if (APPLE)
+            if (CMAKE_OSX_ARCHITECTURES MATCHES "x86_64" AND CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+                set(ISPC_ARCH_SUFFIX ".universal")
+            elseif(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64" OR
+                   (CMAKE_OSX_ARCHITECTURES STREQUAL "" AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64"))
+                set(ISPC_ARCH_SUFFIX ".x86_64")
+            elseif(CMAKE_OSX_ARCHITECTURES MATCHES "arm64" OR
+                   (CMAKE_OSX_ARCHITECTURES STREQUAL "" AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64"))
+                set(ISPC_ARCH_SUFFIX ".arm64")
+            else()
+                message (FATAL_ERROR "Was not able to detect package architecture")
+            endif()
+        elseif (UNIX)
+            # Add .aarch64 suffix if the package is built on AARCH64 system.
+	    # On Linux we don't build cross packages, so host corresponds to target platform.
+            if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+                set(ISPC_ARCH_SUFFIX ".aarch64")
+            endif()
+        endif()
+
         if (${CPACK_PACKAGE_VERSION_PATCH} MATCHES ".*dev")
             string(CONCAT CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}"
                                 "-trunk"
-                                "-${ISPC_SYSTEM_NAME}")
+                                "-${ISPC_SYSTEM_NAME}"
+                                "${ISPC_ARCH_SUFFIX}")
+            string(CONCAT EXAMPLES_PACKAGE_FILE_NAME "ispc-examples-trunk")
         else()
             string(CONCAT CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}"
                                 "-v${CPACK_PACKAGE_VERSION_MAJOR}"
                                 ".${CPACK_PACKAGE_VERSION_MINOR}"
                                 ".${CPACK_PACKAGE_VERSION_PATCH}"
-                                "-${ISPC_SYSTEM_NAME}")
-
+                                "-${ISPC_SYSTEM_NAME}"
+                                "${ISPC_ARCH_SUFFIX}")
+            string(CONCAT EXAMPLES_PACKAGE_FILE_NAME "ispc-examples"
+                                "-v${CPACK_PACKAGE_VERSION_MAJOR}"
+                                ".${CPACK_PACKAGE_VERSION_MINOR}"
+                                ".${CPACK_PACKAGE_VERSION_PATCH}")
         endif()
     else()
         set (CPACK_PACKAGE_FILE_NAME ${ISPC_PACKAGE_NAME})
@@ -760,5 +1103,25 @@ if (ISPC_PREPARE_PACKAGE)
         set(CPACK_PACKAGE_INSTALL_DIRECTORY "ISPC/${CPACK_PACKAGE_FILE_NAME}")
     endif()
     set(CPACK_PACKAGE_VENDOR "Intel Corporation")
+
+    # Strip binaries
+    set(CPACK_STRIP_FILES TRUE)
+
     include(CPack)
+
+    # Custom target to pack only examples
+    if (WIN32)
+        add_custom_target(package-examples
+            COMMENT "Package examples directory to ${EXAMPLES_PACKAGE_FILE_NAME}.zip"
+            COMMAND ${CMAKE_COMMAND} -E tar cf "${CMAKE_BINARY_DIR}/${EXAMPLES_PACKAGE_FILE_NAME}.zip" --format=zip examples
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            )
+    else()
+        add_custom_target(package-examples
+            COMMENT "Package examples directory to ${EXAMPLES_PACKAGE_FILE_NAME}.tar.gz"
+            COMMAND ${CMAKE_COMMAND} -E tar cfz "${CMAKE_BINARY_DIR}/${EXAMPLES_PACKAGE_FILE_NAME}.tar.gz" examples
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            )
+    endif()
+
 endif()

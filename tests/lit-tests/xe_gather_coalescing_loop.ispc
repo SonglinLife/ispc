@@ -4,14 +4,9 @@
 
 
 // RUN: %{ispc} %s --target=gen9-x16 --arch=xe64 -h %t.h --emit-llvm-text --debug-phase=321:321 --dump-file=%t -o /dev/null
-// RUN: FileCheck --input-file %t/ir_321_XeGatherCoalescing.ll %s --check-prefixes CHECK_ALL,CHECK
+// RUN: FileCheck --input-file %t/ir_321_ispcMemoryCoalescing.ll %s --check-prefixes CHECK_ALL,CHECK
 // RUN: %{ispc} %s --target=gen9-x8 --arch=xe64 -h %t.h --emit-llvm-text --debug-phase=321:321 --dump-file=%t -o /dev/null
-// RUN: FileCheck --input-file %t/ir_321_XeGatherCoalescing.ll %s --check-prefixes CHECK_ALL,CHECK
-// RUN: %{ispc} %s --target=gen9-x16 --arch=xe32 -h %t.h --emit-llvm-text --debug-phase=321:321 --dump-file=%t -o /dev/null
-// RUN: FileCheck --input-file %t/ir_321_XeGatherCoalescing.ll %s --check-prefixes CHECK_ALL,CHECK
-// RUN: %{ispc} %s --target=gen9-x8 --arch=xe32 -h %t.h --emit-llvm-text --debug-phase=321:321 --dump-file=%t -o /dev/null
-// RUN: FileCheck --input-file %t/ir_321_XeGatherCoalescing.ll %s --check-prefixes CHECK_ALL,CHECK
-
+// RUN: FileCheck --input-file %t/ir_321_ispcMemoryCoalescing.ll %s --check-prefixes CHECK_ALL,CHECK
 
 // REQUIRES:  XE_ENABLED
 
@@ -23,8 +18,8 @@
 
 // CHECK_ALL-LABEL: @gather_coalescing_loop
 
-// CHECK:           %_in_load_offset = getelementptr float, float* %_in
-// CHECK:           %_in_load_offset_load = load float, float* %_in_load_offset
+// CHECK:           %_in_load_offset = getelementptr float, {{(float\*)|ptr}} %_in
+// CHECK:           %_in_load_offset_load = load float, {{(float\*)|ptr}} %_in_load_offset
 
 task void gather_coalescing_loop(uniform float _out[], uniform float _in[]) {
     uniform float a[NUM];

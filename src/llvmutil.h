@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file llvmutil.h
@@ -42,29 +15,17 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
-
-// In the transition to Opaque Pointers getElementType() was deprecated, getPointerElementType() will live a little
-// longer. But we need another solution eventually. Issue #2245 was filed to track this.
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_14_0
-#define PTR_ELT_TYPE getPointerElementType
-#else
-#define PTR_ELT_TYPE getElementType
-#endif
-
-#define PTYPE(p) (llvm::cast<llvm::PointerType>((p)->getType()->getScalarType())->PTR_ELT_TYPE())
+#include <llvm/Support/ModRef.h>
 
 namespace llvm {
 class PHINode;
 class InsertElementInst;
 } // namespace llvm
 
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
 #define LLVMVECTOR llvm::FixedVectorType
-#else
-#define LLVMVECTOR llvm::VectorType
-#endif
 
 namespace ispc {
 
@@ -81,6 +42,7 @@ struct LLVMTypes {
     static llvm::Type *BoolType;
     static llvm::Type *BoolStorageType;
 
+    static llvm::Type *Int1Type;
     static llvm::Type *Int8Type;
     static llvm::Type *Int16Type;
     static llvm::Type *Int32Type;
@@ -88,6 +50,7 @@ struct LLVMTypes {
     static llvm::Type *Float16Type;
     static llvm::Type *FloatType;
     static llvm::Type *DoubleType;
+    static llvm::Type *PtrType;
 
     static llvm::Type *Int8PointerType;
     static llvm::Type *Int16PointerType;
@@ -109,6 +72,7 @@ struct LLVMTypes {
     static llvm::VectorType *Float16VectorType;
     static llvm::VectorType *FloatVectorType;
     static llvm::VectorType *DoubleVectorType;
+    static llvm::VectorType *PtrVectorType;
 
     static llvm::Type *Int8VectorPointerType;
     static llvm::Type *Int16VectorPointerType;
@@ -133,6 +97,8 @@ extern llvm::Constant *LLVMTrue, *LLVMFalse, *LLVMTrueInStorage, *LLVMFalseInSto
 class Target;
 extern void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target);
 
+/** Returns an LLVM i1 constant of the given value */
+extern llvm::ConstantInt *LLVMInt1(bool i);
 /** Returns an LLVM i8 constant of the given value */
 extern llvm::ConstantInt *LLVMInt8(int8_t i);
 /** Returns an LLVM i8 constant of the given value */
@@ -163,6 +129,10 @@ extern llvm::Constant *LLVMBoolVector(bool v);
 /** Returns an LLVM boolean vector constant of the given value smeared
     across all elements with bool represented as storage type(i8)*/
 extern llvm::Constant *LLVMBoolVectorInStorage(bool v);
+
+/** Returns an LLVM i1 vector constant of the given value smeared
+    across all elements */
+extern llvm::Constant *LLVMInt1Vector(bool i);
 
 /** Returns an LLVM i8 vector constant of the given value smeared
     across all elements */
@@ -210,6 +180,9 @@ extern llvm::Constant *LLVMIntAsType(int64_t, llvm::Type *t);
     the given unsigned integer value. */
 extern llvm::Constant *LLVMUIntAsType(uint64_t, llvm::Type *t);
 
+/** Returns a zero constant half/float/double or vector (according to the given type). */
+extern llvm::Constant *LLVMFPZeroAsType(llvm::Type *type);
+
 /** Returns an LLVM boolean vector based on the given array of values.
     The array should have g->target.vectorWidth elements. */
 extern llvm::Constant *LLVMBoolVector(const bool *v);
@@ -218,6 +191,10 @@ extern llvm::Constant *LLVMBoolVector(const bool *v);
     with bool represented as storage type(i8).
     The array should have g->target.vectorWidth elements. */
 extern llvm::Constant *LLVMBoolVectorInStorage(const bool *v);
+
+/** Returns an LLVM i1 vector based on the given array of values.
+    The array should have g->target.vectorWidth elements. */
+extern llvm::Constant *LLVMInt1Vector(const bool *i);
 
 /** Returns an LLVM i8 vector based on the given array of values.
     The array should have g->target.vectorWidth elements. */
@@ -265,7 +242,7 @@ extern llvm::Constant *LLVMMaskAllOff;
 /** Tests to see if all of the elements of the vector in the 'v' parameter
     are equal.  Like lValuesAreEqual(), this is a conservative test and may
     return false for arrays where the values are actually all equal.  */
-extern bool LLVMVectorValuesAllEqual(llvm::Value *v, llvm::Value **splat = NULL);
+extern bool LLVMVectorValuesAllEqual(llvm::Value *v, llvm::Value **splat = nullptr);
 
 /** Tests to see if OR is actually an ADD.  */
 extern bool IsOrEquivalentToAdd(llvm::Value *op);
@@ -314,11 +291,11 @@ extern bool LLVMExtractVectorInts(llvm::Value *v, int64_t ret[], int *nElts);
                   <i64 4, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef>
          %gep_offset = shufflevector <8 x i64> %0, <8 x i64> undef, <8 x i32> zeroinitializer
     Function returns:
-    Compare all elements and return one of them if all are equal, otherwise NULL.
+    Compare all elements and return one of them if all are equal, otherwise nullptr.
     If searchFirstUndef argument is true, look for the vector with the first not-undef element, like:
          <i64 4, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef>
     If compare argument is false, don't do compare and return first element instead.
-    If undef argument is true, ignore undef elements (but all undef yields NULL anyway).
+    If undef argument is true, ignore undef elements (but all undef yields nullptr anyway).
 
  */
 extern llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, bool compare = true, bool undef = true,
@@ -327,9 +304,7 @@ extern llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, b
 /** This is a utility routine for debugging that dumps out the given LLVM
     value as well as (recursively) all of the other values that it depends
     on. */
-#ifndef ISPC_NO_DUMPS
 extern void LLVMDumpValue(llvm::Value *v);
-#endif
 
 /** Given a vector-typed value, this function returns the value of its
     first element.  Rather than just doing the straightforward thing of
@@ -398,26 +373,26 @@ extern bool LLVMGetSourcePosFromMetadata(const llvm::Instruction *inst, SourcePo
 extern bool LLVMIsValueUndef(llvm::Value *value);
 
 /** Below are helper functions to construct LLVM instructions. */
-extern llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1,
-                                       const llvm::Twine &name, llvm::Instruction *insertBefore = NULL);
+extern llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, const llvm::Twine &name,
+                                    llvm::Instruction *insertBefore = nullptr);
 
-extern llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                       const llvm::Twine &name, llvm::Instruction *insertBefore = NULL);
+extern llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                                    const llvm::Twine &name, llvm::Instruction *insertBefore = nullptr);
 
-extern llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                       llvm::Value *arg3, const llvm::Twine &name,
-                                       llvm::Instruction *insertBefore = NULL);
+extern llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                                    llvm::Value *arg3, const llvm::Twine &name,
+                                    llvm::Instruction *insertBefore = nullptr);
 
-extern llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                       llvm::Value *arg3, llvm::Value *arg4, const llvm::Twine &name,
-                                       llvm::Instruction *insertBefore = NULL);
+extern llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                                    llvm::Value *arg3, llvm::Value *arg4, const llvm::Twine &name,
+                                    llvm::Instruction *insertBefore = nullptr);
 
-extern llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                       llvm::Value *arg3, llvm::Value *arg4, llvm::Value *arg5, const llvm::Twine &name,
-                                       llvm::Instruction *insertBefore = NULL);
+extern llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                                    llvm::Value *arg3, llvm::Value *arg4, llvm::Value *arg5, const llvm::Twine &name,
+                                    llvm::Instruction *insertBefore = nullptr);
 
-extern llvm::Instruction *LLVMGEPInst(llvm::Value *ptr, llvm::Type *ptrElType, llvm::Value *offset, const char *name,
-                                      llvm::Instruction *insertBefore);
+extern llvm::GetElementPtrInst *LLVMGEPInst(llvm::Value *ptr, llvm::Type *ptrElType, llvm::Value *offset,
+                                            const char *name, llvm::Instruction *insertBefore);
 
 /** Mask-related helpers */
 
@@ -434,6 +409,10 @@ extern bool GetMaskFromValue(llvm::Value *factor, uint64_t *mask);
 */
 extern MaskStatus GetMaskStatusFromValue(llvm::Value *mask, int vecWidth = -1);
 
+/** Add uwtable attribute for function, windows specific.
+ */
+extern void AddUWTableFuncAttr(llvm::Function *fn);
+
 #ifdef ISPC_XE_ENABLED
 /** This is utility function to determine memory in which pointer was created.
     For now we use only 3 values:
@@ -442,5 +421,10 @@ extern MaskStatus GetMaskStatusFromValue(llvm::Value *mask, int vecWidth = -1);
     Generic is currently used to identify Global variables
 */
 extern AddressSpace GetAddressSpace(llvm::Value *v);
+
+/** Fix function attribute by removing input function attr and adding memory effect instead.
+    https://reviews.llvm.org/D135780
+*/
+extern void FixFunctionAttribute(llvm::Function &Fn, llvm::Attribute::AttrKind attr, llvm::MemoryEffects memEf);
 #endif
 } // namespace ispc

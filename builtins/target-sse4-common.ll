@@ -1,33 +1,6 @@
-;;  Copyright (c) 2010-2020, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2010-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SSE4 target implementation.
@@ -35,10 +8,9 @@
 ctlztz()
 popcnt()
 define_prefetches()
-define_shuffles()
 aossoa()
-rdrand_decls()
 halfTypeGenericImplementation()
+define_vector_permutations()
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; rounding floats
@@ -286,25 +258,25 @@ define i32 @__max_uniform_uint32(i32, i32) nounwind readonly alwaysinline {
 define(`convert_scale_to_const', `
 
 
- switch i32 %$10, label %default_$1 [ i32 1, label %on_one_$1
-                                      i32 2, label %on_two_$1
-                                      i32 4, label %on_four_$1
-                                      i32 8, label %on_eight_$1]
+ switch i32 %argn(`10',$@), label %default_$1 [ i32 1, label %on_one_$1
+                                                i32 2, label %on_two_$1
+                                                i32 4, label %on_four_$1
+                                                i32 8, label %on_eight_$1]
 
 on_one_$1:
-  %$1_1 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, $11 1)
+  %$1_1 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, argn(`11',$@) 1)
   br label %end_bb_$1
 
 on_two_$1:
-  %$1_2 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, $11 2)
+  %$1_2 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, argn(`11',$@) 2)
   br label %end_bb_$1
 
 on_four_$1:
-  %$1_4 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, $11 4)
+  %$1_4 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, argn(`11',$@) 4)
   br label %end_bb_$1
 
 on_eight_$1:
-  %$1_8 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, $11 8)
+  %$1_8 = call <$3 x $4> @$2(<$3 x $4> undef, i8 * %$5, <$3 x $7> %$6, <$3 x $9> %$8, argn(`11',$@) 8)
   br label %end_bb_$1
 
 default_$1:

@@ -1,3 +1,8 @@
+#
+#  Copyright (c) 2017-2023, Intel Corporation
+#
+#  SPDX-License-Identifier: BSD-3-Clause
+
 FROM centos:7
 MAINTAINER Dmitry Babokin <dmitry.y.babokin@intel.com>
 
@@ -8,7 +13,7 @@ MAINTAINER Dmitry Babokin <dmitry.y.babokin@intel.com>
 RUN yum install -y vim wget yum-utils gcc gcc-c++ git subversion python3 m4 bison flex patch make ncurses-devel zlib-devel glibc-devel.x86_64 glibc-devel.i686 xz && \
     yum clean -y all
 
-# These packages are required if you need to link IPSC with -static.
+# These packages are required if you need to link ISPC with -static.
 RUN yum install -y ncurses-static libstdc++-static zlib-static && \
     yum clean -y all
 

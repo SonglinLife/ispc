@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Intel Corporation
+ * Copyright (c) 2020-2023, Intel Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -72,8 +72,9 @@ void DpcppApp::transformStage2(gpu_vec &in) {
 
     auto ctx = sycl::ext::oneapi::level_zero::make_context(platform.get_devices(), (uintptr_t)m_context,
                                                            /*keep ownership of m_context handler on ISPC side*/ true);
-    auto q = sycl::ext::oneapi::level_zero::make_queue(ctx, device, (uintptr_t)m_command_queue,
-                                                       /*keep ownership of m_command_queue handler on ISPC side*/ true);
+    auto q = sycl::ext::oneapi::level_zero::make_queue(
+        ctx, device, (uintptr_t)m_command_queue, /* immediate command list*/ false,
+        /*keep ownership of m_command_queue handler on ISPC side*/ true, sycl::property_list{});
 
     // Set problem space
     sycl::range<1> range{in.size()};

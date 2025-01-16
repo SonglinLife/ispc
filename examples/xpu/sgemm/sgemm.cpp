@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021, Intel Corporation
+ * Copyright (c) 2019-2023, Intel Corporation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -30,35 +30,50 @@
 
 using namespace hostutil;
 
+bool get_bool_envvar(const char *name) {
+    int parsed = 0;
+    const char *val = getenv(name);
+    if (val) {
+        std::istringstream is(val);
+        is >> parsed;
+        if (is) {
+            if (parsed == 0) {
+                return false;
+            } else if (parsed == 1) {
+                return true;
+            }
+        }
+        std::stringstream ss;
+        ss << "Incorrect value of " << name << " variable, set 0 or 1.";
+        throw std::runtime_error(ss.str());
+    }
+    return false;
+}
+
+bool useZebin() {
+    bool flag = get_bool_envvar("ISPC_EXAMPLES_USE_ZEBIN");
+    if (!flag) {
+        flag = get_bool_envvar("ISPCRT_USE_ZEBIN");
+    }
+    return flag;
+}
+
 void SGEMMApp::initialize() {
     if (initialized)
         return;
 
-    auto useZebin = getenv("ISPC_EXAMPLES_USE_ZEBIN") != nullptr;
-    if (!useZebin) {
-        useZebin = getenv("ISPCRT_USE_ZEBIN") != nullptr;
-    }
+    bool useZebinFlag = useZebin();
 
-#ifdef CMKERNEL
-    L0InitContext(m_driver, m_device, m_context, m_module, m_command_queue, "naive_sgemm_cm_mt.spv");
-#else
-    L0InitContext(m_driver, m_device, m_context, m_module, m_command_queue, "xe_sgemm", useZebin);
-#endif
+    L0InitContext(m_driver, m_device, m_context, m_module, m_command_queue, "xe_sgemm", useZebinFlag);
 
     // Get device timestamp resolution - needed for time measurments
     ze_device_properties_t device_properties = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
     L0_SAFE_CALL(zeDeviceGetProperties(m_device, &device_properties));
     m_timestamp_freq = device_properties.timerResolution;
 
-#ifdef CMKERNEL
-    if (m_verbose)
-        std::cout << "Running CM kernel\n";
-    L0Create_Kernel(m_device, m_context, m_module, m_command_list, m_kernel, "sgemm_kernel");
-#else
     if (m_verbose)
         std::cout << "Running ISPC kernel\n";
     L0Create_Kernel(m_device, m_context, m_module, m_command_list, m_kernel, "SGEMM_naive_task");
-#endif
 
     L0Create_EventPool(m_device, m_context, 1, m_pool);
 
@@ -101,9 +116,9 @@ void SGEMMApp::run(SGEMMApp::RunResult &result, int m, int niter, int gx, int gy
         printf("Thread-group setting: %d x %d \n", gx, gy);
     }
     // Allocate matrices
-    Matrix A(m, k, lda, NULL, true, "A", st);
-    Matrix B(k, n, ldb, NULL, true, "B", st);
-    Matrix C(m, n, ldc, NULL, false, "C", st);
+    Matrix A(m, k, lda, nullptr, true, "A", st);
+    Matrix B(k, n, ldb, nullptr, true, "B", st);
+    Matrix C(m, n, ldc, nullptr, false, "C", st);
     Matrix C_gold(C, "C_gold");
 
     if (validate) {
@@ -133,9 +148,9 @@ void SGEMMApp::run(SGEMMApp::RunResult &result, int m, int niter, int gx, int gy
 
     ze_device_mem_alloc_desc_t alloc_desc = {};
 
-    L0_SAFE_CALL(zeMemAllocDevice(m_context, &alloc_desc, mtA_size * sizeof(float), 0, m_device, &a_buf));
-    L0_SAFE_CALL(zeMemAllocDevice(m_context, &alloc_desc, mtB_size * sizeof(float), 0, m_device, &b_buf));
-    L0_SAFE_CALL(zeMemAllocDevice(m_context, &alloc_desc, mtC_size * sizeof(float), 0, m_device, &c_buf));
+    L0_SAFE_CALL(zeMemAllocDevice(m_context, &alloc_desc, mtA_size * sizeof(float), 64, m_device, &a_buf));
+    L0_SAFE_CALL(zeMemAllocDevice(m_context, &alloc_desc, mtB_size * sizeof(float), 64, m_device, &b_buf));
+    L0_SAFE_CALL(zeMemAllocDevice(m_context, &alloc_desc, mtC_size * sizeof(float), 64, m_device, &c_buf));
 
     L0_SAFE_CALL(zeCommandListReset(m_command_list));
     L0_SAFE_CALL(

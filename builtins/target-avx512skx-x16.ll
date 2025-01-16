@@ -1,38 +1,42 @@
-;;  Copyright (c) 2016-2022, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2016-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 define(`WIDTH',`16')
 define(`ISA',`AVX512SKX')
 
 include(`target-avx512-common-16.ll')
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; shuffles
+
+shuffle1(i8)
+shuffle2(i8)
+
+declare <WIDTH x i16> @llvm.x86.avx512.mask.permvar.hi.256(<WIDTH x i16>, <WIDTH x i16>, <WIDTH x i16>, i16)
+define <WIDTH x i16> @__shuffle_i16(<WIDTH x i16>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %ind = trunc <WIDTH x i32> %1 to <WIDTH x i16>
+  %res = call <WIDTH x i16> @llvm.x86.avx512.mask.permvar.hi.256(<WIDTH x i16> %0, <WIDTH x i16> %ind, <WIDTH x i16> zeroinitializer, i16 -1)
+  ret <WIDTH x i16> %res
+}
+
+declare <WIDTH x i16> @llvm.x86.avx512.vpermi2var.hi.256(<WIDTH x i16>, <WIDTH x i16>, <WIDTH x i16>)
+define <WIDTH x i16> @__shuffle2_i16(<WIDTH x i16>, <WIDTH x i16>, <WIDTH x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<WIDTH x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <WIDTH x i16> @__shuffle2_const_i16(<WIDTH x i16> %0, <WIDTH x i16> %1, <WIDTH x i32> %2)
+  ret <WIDTH x i16> %res_const
+
+not_const:
+  %ind = trunc <WIDTH x i32> %2 to <WIDTH x i16>
+  %res = call <WIDTH x i16> @llvm.x86.avx512.vpermi2var.hi.256(<WIDTH x i16> %0, <WIDTH x i16> %ind, <WIDTH x i16> %1)
+  ret <WIDTH x i16> %res
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; rcp/rsqrt declarations for half
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; svml
@@ -156,3 +160,6 @@ define <16 x double> @__rsqrt_varying_double(<16 x double> %v) nounwind readonly
 }
 
 ;;saturation_arithmetic_novec()
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; dot product

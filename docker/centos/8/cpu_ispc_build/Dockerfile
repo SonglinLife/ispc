@@ -1,4 +1,7 @@
-ARG LLVM_VERSION=13.0
+#
+#  Copyright (c) 2017-2024, Intel Corporation
+#
+#  SPDX-License-Identifier: BSD-3-Clause
 
 FROM rockylinux:8 AS llvm_only
 LABEL maintainer="Dmitry Babokin <dmitry.y.babokin@intel.com>"
@@ -6,53 +9,45 @@ SHELL ["/bin/bash", "-c"]
 
 ARG REPO=ispc/ispc
 ARG SHA=main
-ARG LLVM_VERSION
 
 # !!! Make sure that your docker config provides enough memory to the container,
 # otherwise LLVM build may fail, as it will use all the cores available to container.
 
-# Packages required to build ISPC and Clang. libtool is needed to build ncurses.
-RUN dnf -y update && dnf install -y wget-1.19.5 yum-utils-4.0.21 gcc-8.5.0 gcc-c++-8.5.0 git-2.31.1 python36-3.6.8 make-4.2.1 ncurses-devel-6.1 xz-5.2.4 libtool-2.4.6 && \
-#    yum install -y libtool autopoint gettext-devel texinfo help2man && \
+# Packages required to build ISPC and Clang.
+RUN dnf -y update && dnf install -y wget yum-utils gcc gcc-c++ git python3 make xz tbb-devel && \
     dnf clean -y all
 
-# These packages are required if you need to link IPSC with -static.
-RUN dnf -y --enablerepo=powertools install libstdc++-static-8.5.0 && \
+# These packages are required if you need to link ISPC with -static.
+# Ninja is required for superbuild
+RUN dnf -y --enablerepo=powertools install ninja-build libstdc++-static && \
     dnf clean -y all
+
+RUN if [[ $(uname -m) =~ "x86" ]]; then dnf -y update && dnf install -y glibc-devel.i686 && dnf clean -y all; fi
 
 WORKDIR /usr/local/src
 
-# Ncurses for g++ --static -lcurses -ltinfo. Despite setting --enable-overwrite it doesn't link(only static not linked?) libncurses as libcurses so symlinked manually
-RUN git clone https://github.com/ThomasDickey/ncurses-snapshots.git --depth=1 --branch=v6_3
-WORKDIR /usr/local/src/ncurses-snapshots
-RUN ./configure --with-termlib --with-libtool --with-libtool-opts=-static --enable-static --enable-overwrite && make -j"$(nproc)" && make install && \
-  ln -s /usr/lib/libncurses.a /usr/lib/libcurses.a && ln -s /usr/lib/libncurses++.a /usr/lib/libcurses++.a
-
-# Download and install required version of cmake (3.14 for x86, 3.20 for aarch64, as earlier versions are not available as binary distribution) for ISPC build
-RUN if [[ $(uname -m) =~ "x86" ]]; then export CMAKE_URL="https://cmake.org/files/v3.14/cmake-3.14.0-Linux-x86_64.sh"; else export CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v3.20.3/cmake-3.20.3-linux-aarch64.sh"; fi && \
-    wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 $CMAKE_URL && mkdir /opt/cmake && sh cmake-*.sh --prefix=/opt/cmake --skip-license && \
-    ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake && rm -rf cmake-*.sh
+# Download and install required version of cmake (3.23.5 for both x86 and aarch64) as required for superbuild preset jsons.
+RUN if [[ $(uname -m) =~ "x86" ]]; then \
+        export CMAKE_URL="https://cmake.org/files/v3.23/cmake-3.23.5-linux-x86_64.sh"; \
+    else \
+        export CMAKE_URL="https://github.com/Kitware/CMake/releases/download/v3.23.5/cmake-3.23.5-linux-aarch64.sh"; \
+    fi && \
+    wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 $CMAKE_URL && \
+    sh cmake-*.sh --prefix=/usr/local --skip-license && rm -rf cmake-*.sh
 
 # If you are behind a proxy, you need to configure git.
-RUN if [ -v "$http_proxy" ]; then git config --global --add http.proxy "$http_proxy"; fi
+RUN if [ -v http_proxy ]; then git config --global --add http.proxy "$http_proxy"; fi
 
 WORKDIR /usr/local/src
 
 # Fork ispc on github and clone *your* fork.
 RUN git clone https://github.com/$REPO.git ispc
 
-# This is home for Clang builds
-RUN mkdir /usr/local/src/llvm
-
-ENV ISPC_HOME=/usr/local/src/ispc
-ENV LLVM_HOME=/usr/local/src/llvm
-
 # If you are going to run test for future platforms, go to
 # http://www.intel.com/software/sde and download the latest version,
 # extract it, add to path and set SDE_HOME.
 
 WORKDIR /usr/local/src/ispc
-RUN git checkout $SHA
 
 # Build Clang with all required patches.
 # Pass required LLVM_VERSION with --build-arg LLVM_VERSION=<version>.
@@ -61,19 +56,35 @@ RUN git checkout $SHA
 # or better do clang selfbuild and use it for ispc build as well (i.e. just "make").
 # "rm" are just to keep docker image small.
 # Add --llvm-disable-assertions for building "release" version.
-RUN ./alloy.py -b --version="$LLVM_VERSION" --selfbuild --verbose && \
-    rm -rf "$LLVM_HOME"/build-"$LLVM_VERSION" "$LLVM_HOME"/llvm-"$LLVM_VERSION" "$LLVM_HOME"/bin-"$LLVM_VERSION"_temp "$LLVM_HOME"/build-"$LLVM_VERSION"_temp
-
-ENV PATH=$LLVM_HOME/bin-$LLVM_VERSION/bin:$PATH
+RUN git checkout $SHA && \
+    cmake superbuild \
+        -B build \
+        --preset os \
+        -DXE_DEPS=OFF \
+        -DBUILD_STAGE2_TOOLCHAIN_ONLY=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    cmake --build build && \
+    rm -rf build
 
 FROM llvm_only AS ispc_build
+SHELL ["/bin/bash", "-c"]
 
-ARG LLVM_VERSION
+RUN dnf -y update && dnf install -y m4 bison flex && dnf clean -y all
 
-RUN dnf -y update && dnf install -y m4-1.4.18 bison-3.0.4 flex-2.6.1 && dnf clean -y all
-RUN if [[ $(uname -m) =~ "x86" ]]; then dnf -y update && dnf install -y glibc-devel-2.28-189.5.el8_6.i686 && dnf clean -y all; fi
+# Create new non-root user and switch to it
+RUN useradd -m -d /home/ispc_user -s /bin/bash -U ispc_user && \
+    chown -R ispc_user:ispc_user /usr
+
+USER ispc_user
 
 # Build ISPC
-RUN mkdir build
-WORKDIR /usr/local/src/ispc/build
-RUN cmake .. -DISPC_CROSS=ON && make -j"$(nproc)" && make check-all
+WORKDIR /usr/local/src/ispc
+RUN cmake . \
+        -B build \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DISPC_PREPARE_PACKAGE=ON \
+        -DISPC_CROSS=ON && \
+    cmake --build build --target package -j"$(nproc)" && \
+    cmake --build build --target check-all && \
+    cmake --install build && \
+    rm -rf build

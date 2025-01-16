@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2025, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file sym.cpp
@@ -36,8 +9,11 @@
 */
 
 #include "sym.h"
+#include "expr.h"
+#include "func.h"
 #include "type.h"
 #include "util.h"
+
 #include <algorithm>
 #include <array>
 #include <iterator>
@@ -48,9 +24,24 @@ using namespace ispc;
 ///////////////////////////////////////////////////////////////////////////
 // Symbol
 
-Symbol::Symbol(const std::string &n, SourcePos p, const Type *t, StorageClass sc)
-    : pos(p), name(n), storageInfo(NULL), function(NULL), exportedFunction(NULL), type(t), constValue(NULL),
-      storageClass(sc), varyingCFDepth(0), parentFunction(NULL) {}
+Symbol::Symbol(const std::string &n, SourcePos p, SymbolKind st, const Type *t, StorageClass sc, AttributeList *a)
+    : pos(p), name(n), storageInfo(nullptr), function(nullptr), exportedFunction(nullptr), type(t), constValue(nullptr),
+      storageClass(sc), varyingCFDepth(0), parentFunction(nullptr),
+      attrs(a != nullptr ? new AttributeList(*a) : nullptr), kind(st) {}
+
+Symbol::~Symbol() {
+    if (attrs != nullptr) {
+        delete attrs;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+// TemplateSymbol
+
+TemplateSymbol::TemplateSymbol(const TemplateParms *parms, const std::string &n, const FunctionType *t, StorageClass sc,
+                               const SourcePos p, bool inl, bool noinl)
+    : pos(p), name(n), type(t), storageClass(sc), templateParms(parms), functionTemplate(nullptr), isInline(inl),
+      isNoInline(noinl) {}
 
 ///////////////////////////////////////////////////////////////////////////
 // SymbolTable
@@ -61,31 +52,50 @@ SymbolTable::~SymbolTable() {
     // Otherwise we have mismatched push/pop scopes
     Assert(variables.size() == 1);
     PopScope();
+
+    for (auto p : freeSymbolMaps) {
+        delete p;
+    }
+
+    for (auto const &x : functionTemplates) {
+        for (auto *p : x.second) {
+            if (p) {
+                delete p;
+            }
+        }
+    }
 }
 
 void SymbolTable::PushScope() {
-    SymbolMapType *sm;
+    SymbolMapType *sm = nullptr;
     if (freeSymbolMaps.size() > 0) {
         sm = freeSymbolMaps.back();
         freeSymbolMaps.pop_back();
         sm->erase(sm->begin(), sm->end());
-    } else
+    } else {
         sm = new SymbolMapType;
+    }
 
     variables.push_back(sm);
     types.emplace_back();
 }
 
 void SymbolTable::PopScope() {
-    Assert(variables.size() > 1);
-    Assert(types.size() > 1);
+    Assert(variables.size() > 0);
+    Assert(types.size() > 0);
     freeSymbolMaps.push_back(variables.back());
     variables.pop_back();
     types.pop_back();
 }
 
+void SymbolTable::PopInnerScopes() {
+    while (variables.size() > 1) {
+        PopScope();
+    }
+}
+
 bool SymbolTable::AddVariable(Symbol *symbol) {
-    Assert(symbol != NULL);
+    Assert(symbol != nullptr);
 
     // Check to see if a symbol of the same name has already been declared.
     for (int i = (int)variables.size() - 1; i >= 0; --i) {
@@ -119,19 +129,21 @@ Symbol *SymbolTable::LookupVariable(const char *name) {
     for (int i = (int)variables.size() - 1; i >= 0; --i) {
         SymbolMapType &sm = *(variables[i]);
         SymbolMapType::iterator iter = sm.find(name);
-        if (iter != sm.end())
+        if (iter != sm.end()) {
             return iter->second;
+        }
     }
-    return NULL;
+    return nullptr;
 }
 
 bool SymbolTable::AddFunction(Symbol *symbol) {
     const FunctionType *ft = CastType<FunctionType>(symbol->type);
-    Assert(ft != NULL);
-    if (LookupFunction(symbol->name.c_str(), ft) != NULL)
+    Assert(ft != nullptr);
+    if (LookupFunction(symbol->name.c_str(), ft) != nullptr) {
         // A function of the same name and type has already been added to
         // the symbol table
         return false;
+    }
 
     std::vector<Symbol *> &funOverloads = functions[symbol->name];
     funOverloads.push_back(symbol);
@@ -141,12 +153,13 @@ bool SymbolTable::AddFunction(Symbol *symbol) {
 bool SymbolTable::LookupFunction(const char *name, std::vector<Symbol *> *matches) {
     FunctionMapType::iterator iter = functions.find(name);
     if (iter != functions.end()) {
-        if (matches == NULL)
+        if (matches == nullptr) {
             return true;
-        else {
+        } else {
             const std::vector<Symbol *> &funcs = iter->second;
-            for (int j = 0; j < (int)funcs.size(); ++j)
+            for (int j = 0; j < (int)funcs.size(); ++j) {
                 matches->push_back(funcs[j]);
+            }
         }
     }
     return matches ? (matches->size() > 0) : false;
@@ -157,15 +170,16 @@ Symbol *SymbolTable::LookupFunction(const char *name, const FunctionType *type) 
     if (iter != functions.end()) {
         std::vector<Symbol *> funcs = iter->second;
         for (int j = 0; j < (int)funcs.size(); ++j) {
-            if (Type::Equal(funcs[j]->type, type))
+            if (Type::Equal(funcs[j]->type, type)) {
                 return funcs[j];
+            }
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 bool SymbolTable::AddIntrinsics(Symbol *symbol) {
-    if (LookupIntrinsics(symbol->function) != NULL) {
+    if (LookupIntrinsics(symbol->function) != nullptr) {
         // A function of the same type has already been added to
         // the symbol table
         return false;
@@ -183,9 +197,53 @@ Symbol *SymbolTable::LookupIntrinsics(llvm::Function *func) {
     return nullptr;
 }
 
+bool SymbolTable::AddFunctionTemplate(TemplateSymbol *templ) {
+    Assert(templ && templ->templateParms && templ->type);
+    if (LookupFunctionTemplate(templ->templateParms, templ->name, templ->type) != nullptr) {
+        // A function template of the same name and type has already been added to
+        // the symbol table
+        return false;
+    }
+
+    std::vector<TemplateSymbol *> &funTemplOverloads = functionTemplates[templ->name];
+    funTemplOverloads.push_back(templ);
+    return true;
+}
+
+bool SymbolTable::LookupFunctionTemplate(const std::string &name, std::vector<TemplateSymbol *> *matches) {
+    FunctionTemplateMapType::iterator iter = functionTemplates.find(name);
+    if (iter != functionTemplates.end()) {
+        if (matches == nullptr) {
+            return true;
+        }
+        const std::vector<TemplateSymbol *> &templs = iter->second;
+        for (auto templ : templs) {
+            matches->push_back(templ);
+        }
+    }
+    return matches ? (matches->size() > 0) : false;
+}
+
+TemplateSymbol *SymbolTable::LookupFunctionTemplate(const TemplateParms *templateParmList, const std::string &name,
+                                                    const FunctionType *type) {
+    // The template declaration matches if:
+    // - template paramters list matches
+    // - function types match
+    FunctionTemplateMapType::iterator iter = functionTemplates.find(name);
+    if (iter != functionTemplates.end()) {
+        std::vector<TemplateSymbol *> templs = iter->second;
+        for (auto templ : templs) {
+            if (templateParmList->IsEqual(templ->templateParms) && Type::Equal(templ->type, type)) {
+                return templ;
+            }
+        }
+    }
+    return nullptr;
+}
+
 bool SymbolTable::AddType(const char *name, const Type *type, SourcePos pos) {
     const Type *t = LookupLocalType(name);
-    if (t != NULL && CastType<UndefinedStructType>(t) == NULL) {
+    if (t != nullptr && CastType<UndefinedStructType>(t) == nullptr) {
         // If we have a previous declaration of anything other than an
         // UndefinedStructType with this struct name, issue an error.  If
         // we have an UndefinedStructType, then we'll fall through to the
@@ -204,8 +262,9 @@ const Type *SymbolTable::LookupType(const char *name) const {
     // Again, search through the type maps backward to get scoping right.
     for (std::vector<TypeMapType>::const_reverse_iterator it = types.rbegin(); it != types.rend(); it++) {
         TypeMapType::const_iterator type_it = it->find(name);
-        if (type_it != it->end())
+        if (type_it != it->end()) {
             return type_it->second;
+        }
     }
     return nullptr;
 }
@@ -215,17 +274,19 @@ const Type *SymbolTable::LookupLocalType(const char *name) const {
     Assert(types.size() > 0);
 
     auto result = types.back().find(name);
-    if (result == types.back().end())
+    if (result == types.back().end()) {
         return nullptr;
-    else
+    } else {
         return result->second;
+    }
 }
 
 bool SymbolTable::ContainsType(const Type *type) const {
     for (const TypeMapType &typeMap : types) {
         for (const std::pair<const std::string, const Type *> &entry : typeMap) {
-            if (entry.second == type)
+            if (entry.second == type) {
                 return true;
+            }
         }
     }
     return false;
@@ -246,35 +307,32 @@ std::vector<std::string> SymbolTable::ClosestVariableOrFunctionMatch(const char 
         for (iter = sv.begin(); iter != sv.end(); ++iter) {
             const Symbol *sym = iter->second;
             int dist = StringEditDistance(str, sym->name, maxDelta + 1);
-            if (dist <= maxDelta)
+            if (dist <= maxDelta) {
                 matches[dist].push_back(sym->name);
+            }
         }
     }
 
     FunctionMapType::const_iterator iter;
     for (iter = functions.begin(); iter != functions.end(); ++iter) {
         int dist = StringEditDistance(str, iter->first, maxDelta + 1);
-        if (dist <= maxDelta)
+        if (dist <= maxDelta) {
             matches[dist].push_back(iter->first);
+        }
     }
 
     // Now, return the first entry of matches[] that is non-empty, if any.
     for (int i = 0; i <= maxDelta; ++i) {
-        if (matches[i].size())
+        if (matches[i].size()) {
             return matches[i];
+        }
     }
 
     // Otherwise, no joy.
     return std::vector<std::string>();
 }
 
-std::vector<std::string> SymbolTable::ClosestTypeMatch(const char *str) const { return closestTypeMatch(str, true); }
-
 std::vector<std::string> SymbolTable::ClosestEnumTypeMatch(const char *str) const {
-    return closestTypeMatch(str, false);
-}
-
-std::vector<std::string> SymbolTable::closestTypeMatch(const char *str, bool structsVsEnums) const {
     // This follows the same approach as ClosestVariableOrFunctionMatch()
     // above; compute all edit distances, keep the ones shorter than
     // maxDelta, return the first non-empty vector of one or more sets of
@@ -287,24 +345,25 @@ std::vector<std::string> SymbolTable::closestTypeMatch(const char *str, bool str
             // Skip over either StructTypes or EnumTypes, depending on the
             // value of the structsVsEnums parameter
             bool isEnum = (CastType<EnumType>(entry.second) != nullptr);
-            if (isEnum && structsVsEnums)
+            if (!isEnum) {
                 continue;
-            else if (!isEnum && !structsVsEnums)
-                continue;
+            }
 
             int dist = StringEditDistance(str, entry.first, maxDelta + 1);
-            if (dist <= maxDelta)
+            if (dist <= maxDelta) {
                 matches[dist].push_back(entry.first);
+            }
         }
     }
 
     auto predicate = [](const std::vector<std::string> &set) { return set.empty(); };
 
     auto result = std::find_if_not(matches.begin(), matches.end(), predicate);
-    if (result == matches.end())
+    if (result == matches.end()) {
         return std::vector<std::string>();
-    else
+    } else {
         return *result;
+    }
 }
 
 void SymbolTable::Print() {
@@ -327,8 +386,9 @@ void SymbolTable::Print() {
     while (fiter != functions.end()) {
         fprintf(stderr, "%s\n", fiter->first.c_str());
         std::vector<Symbol *> &syms = fiter->second;
-        for (unsigned int j = 0; j < syms.size(); ++j)
+        for (unsigned int j = 0; j < syms.size(); ++j) {
             fprintf(stderr, "    %s\n", syms[j]->type->GetString().c_str());
+        }
         ++fiter;
     }
 
@@ -342,34 +402,4 @@ void SymbolTable::Print() {
         fprintf(stderr, "\n");
         depth += 4;
     }
-}
-
-inline int ispcRand() {
-#ifdef ISPC_HOST_IS_WINDOWS
-    return rand();
-#else
-    return lrand48();
-#endif
-}
-
-Symbol *SymbolTable::RandomSymbol() {
-    int v = ispcRand() % variables.size();
-    if (variables[v]->size() == 0)
-        return NULL;
-    int count = ispcRand() % variables[v]->size();
-    SymbolMapType::iterator iter = variables[v]->begin();
-    while (count-- > 0) {
-        ++iter;
-        Assert(iter != variables[v]->end());
-    }
-    return iter->second;
-}
-
-const Type *SymbolTable::RandomType() {
-
-    int randomScopeIndex = ispcRand() % types.size();
-
-    int randomTypeIndex = ispcRand() % types[randomScopeIndex].size();
-
-    return std::next(types[randomScopeIndex].cbegin(), randomTypeIndex)->second;
 }

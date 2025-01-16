@@ -1,43 +1,16 @@
 /*
-  Copyright (c) 2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2022-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 #include "CheckIRForXeTarget.h"
 
+#include <regex>
+
 #ifdef ISPC_XE_ENABLED
 
 namespace ispc {
-
-char CheckIRForXeTarget::ID = 0;
 
 bool CheckIRForXeTarget::checkAndFixIRForXe(llvm::BasicBlock &bb) {
     DEBUG_START_BB("CheckIRForXeTarget");
@@ -79,14 +52,26 @@ bool CheckIRForXeTarget::checkAndFixIRForXe(llvm::BasicBlock &bb) {
                 }
                 llvm::Value *dataSizeGen = llvm::ConstantInt::get(LLVMTypes::Int8Type, genSize);
                 ci->setArgOperand(6, dataSizeGen);
+            } else {
+                llvm::Function *func = ci->getCalledFunction();
+                if (func == nullptr)
+                    continue;
+                // Check if the function name corresponds to the unsupported pattern
+                std::string funcName = func->getName().str();
+                static const std::regex unsupportedAtomicFuncs(
+                    "__atomic_f(add|sub|min|max)_(float|double)_global|"
+                    "__atomic_f(add|sub|min|max)_uniform_(float|double)_global");
+                if (std::regex_match(funcName, unsupportedAtomicFuncs)) {
+                    Error(pos, "This atomic operation is not supported for FP types on Xe target");
+                }
             }
         }
         // Report error if double type is not supported by the target
         if (!g->target->hasFp64Support()) {
             for (int i = 0; i < (int)inst->getNumOperands(); ++i) {
                 llvm::Type *t = inst->getOperand(i)->getType();
-                if (t == LLVMTypes::DoubleType || t == LLVMTypes::DoublePointerType ||
-                    t == LLVMTypes::DoubleVectorType || t == LLVMTypes::DoubleVectorPointerType) {
+                // No need to check for double pointer types in opaque pointers mode.
+                if (t->isDoubleTy()) {
                     Error(pos, "\'double\' type is not supported by the target\n");
                 }
             }
@@ -96,17 +81,14 @@ bool CheckIRForXeTarget::checkAndFixIRForXe(llvm::BasicBlock &bb) {
     return modifiedAny;
 }
 
-bool CheckIRForXeTarget::runOnFunction(llvm::Function &F) {
-    llvm::TimeTraceScope FuncScope("CheckIRForXeTarget::runOnFunction", F.getName());
+llvm::PreservedAnalyses CheckIRForXeTarget::run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
+    llvm::TimeTraceScope FuncScope("CheckIRForXeTarget::run", F.getName());
 
-    bool modifiedAny = false;
     for (llvm::BasicBlock &BB : F) {
-        modifiedAny |= checkAndFixIRForXe(BB);
+        checkAndFixIRForXe(BB);
     }
-    return modifiedAny;
+    return llvm::PreservedAnalyses::all();
 }
-
-llvm::Pass *CreateCheckIRForXeTarget() { return new CheckIRForXeTarget(); }
 
 } // namespace ispc
 

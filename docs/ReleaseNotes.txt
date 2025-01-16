@@ -1,3 +1,591 @@
+=== v1.25.0 === (15 October 2024)
+
+ISPC release featuring new attribute syntax support, extended template handling
+for short vectors and arrays, added support for new Intel GPUs and CPUs, and
+significant code generation enhancements. This release is based on patched LLVM
+18.1.8, with the minimum required glibc version for Linux binaries raised to
+2.27.
+
+Language changes:
+
+ - Added support for `__attribute__` syntax in variable and function
+   declarations.  The following attributes are now supported: `noescape`,
+   `address_space(N)`, `external_only`, and `unmangled`.
+ - Added template support for short vectors and extended it for array
+   declarations, allowing the use of type and non-type parameters to specify
+   their types and dimensions.
+ - Added error messages for variable declarations with incompatible type
+   specifiers.
+ - Supported typedef with same name as struct tag.
+
+Code generation:
+
+ - Improved generated code for cases when `foreach` loop iteration domain is
+   equal 3.
+ - Reduced the number of copies in dispatcher logic for cases where a user
+   application consists of several multi-target modules.
+ - Improved the generated code for `foreach` loop counters by propagating
+   LLVM IR flags (e.g., `nsw`, `nuw`) in ISPC optimization passes.
+ - Improved shuffles generation for some AVX2 and AVX512 targets, resulting in
+   up to 80% faster code.
+ - Produced IEEE 754 compliant instructions (`fminnm`/`vminnm`) on ARM for
+   min/max operations.
+
+Compile time:
+
+ - Updated standard library (stdlib) processing: ISPC no longer parses the
+   stdlib source code for each compiled source file. Instead, the stdlib is
+   precompiled into an LLVM IR module during the ISPC build process and is loaded
+   and linked on-demand when needed by user code. This change significantly reduces
+   compilation time, with improvements ranging from 5% to 60%, depending on the
+   size of the user's code (the smaller the code, the greater the improvement).
+   More details about this change is here:
+   https://github.com/ispc/ispc/blob/main/docs/design/TargetRedesign.md
+
+New targets:
+
+ - Added `xe2hpg-x16` and `xe2hpg-x32` targets for Xe2 Battlemage Intel(R) GPUs.
+ - Added `xe2lpg-x16` and `xe2lpg-x32` targets for Xe2 Lunar Lake Intel(R) GPUs.
+ - Added CPU definitions for `ArrowLake`, `LunarLake` and `GraniteRapids`:
+   `arrowlake`, `lunarlake` and `graniterapids` respectively.
+
+Deprecated targets:
+
+ - `avx512knl-x16`, `gen9-x8` and `gen9-x16` targets are deprecated and will be
+   removed in future releases.
+ - Adjusted device names for `xelpg-x8` and `xelpg-x16` to `mtl-u` and `mtl-h`.
+
+Standard library:
+
+ - Fixed the implementation of `exp` for `-Inf`, `NaN`, and large numbers, which
+   previously resulted in highly inaccurate results.
+ - Added a function for the floating-point remainder of division (`fmod`) for
+   floating-point types.
+ - Added support for float/double atomics (add, sub, min, max)
+
+Compiler switches behavior:
+
+ - Supported the `-ffunction-sections` command line flag to generate each
+   function in a separate section.
+
+Infrastructure/build changes:
+
+ - ISPC can now be built in two modes: slim and composite. The default mode is
+   composite, which corresponds to the current distribution practice of
+   packaging ISPC as a single binary. The slim mode can be enabled by setting
+   `ISPC_SLIM_BINARY=ON`. In this mode, the stdlib and binutils libraries are
+   excluded from the binary, resulting in a smaller binary footprint. Instead,
+   these libraries are placed alongside the ISPC binary. This mode simplifies the
+   ISPC build process, making it more suitable for development purposes.
+ - Removed build dependency from `ncurses/terminfo`.
+ - Added dead code stripping for macOS binaries during linking to reduce the
+   final binary size.
+ - Fixed build logic for determining the list of system libraries required by
+   LLVM.
+ - Fixed issue with installation of test files for ISPC Runtime.
+ - Added numerous new GitHub Actions workflows with security testing. ISPC now
+   follows OpenSSF best practices for development.
+
+Bug fixes:
+
+ - Fixed crashes found by fuzzing.
+ - Fixed C/C++ header generation for typedefs with anonymous structs.
+ - Fixed the loss of the uniform qualifier in nested templates.
+ - Added dump of module verifier's output when it reports an error.
+
+Recommended versions of Runtime Dependencies when targeting GPU:
+
+Linux:
+
+ - Intel(R) Graphics Compute Runtime
+   https://github.com/intel/compute-runtime/releases/tag/24.35.30872.22
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.17.28
+ - Threading Building Blocks (TBB)
+
+Alternatively, you can use a validated gfx driver stack supporting Intel® Arc™
+available at https://dgpu-docs.intel.com/driver/installation.html
+
+Windows:
+
+ - Intel(R) Graphics Windows(R) DCH Drivers 32.0.101.6083
+   https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.17.28
+ - OpenCL™ Offline Compiler (OCLOC)
+   https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+   (this is needed for AoT compilation on Windows only)
+ - Supported GPU platforms: Intel(R) Arc Graphics, 11th-13th Gen Intel(R) Core
+   processor graphics
+
+Components revisions used in GPU-enabled build:
+ - https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/43fb73fe
+ - https://github.com/intel/vc-intrinsics/commit/4f5bc1bb
+ - https://github.com/oneapi-src/level-zero/commit/c1f6e28 (v1.17.28)
+ - https://github.com/llvm/llvm-project/commit/3b5b5c1(llvmorg-18.1.8) +
+   patches from llvm_patches folder
+
+=== v1.24.0 === (16 May 2024)
+
+ISPC release with dot product functions, non-type template parameters, and
+generated code improvements. This release is based on patched LLVM 17.0.6.
+
+Language changes:
+
+ - Added support for non-type template parameters. Uniform integers and enums
+   can be used now as template parameters.
+ - Added dot product functions for unsigned and signed `int8` and `int16`
+   types. They leverage AVX-VNNI and AVX512-VNNI instructions if supported by
+   targets.
+ - Added macro definitions for numeric limits.
+
+New targets:
+
+ - Added targets:
+
+   1. `avx2vnni-i32x4`, `avx2vnni-i32x8`, `avx2vnni-i32x16` with AVX-VNNI
+   instruction support,
+   2.  `avx512icl-x4`, `avx512icl-x8`, `avx512icl-x16`, `avx512icl-x32` and
+   `avx512icl-x64` with AVX512-VNNI instruction support.
+
+Code generation:
+
+ - Fixed generation of code for GPU when unnecessary vectorized instruction are
+   used during address arithmetic, e.g., for accessing fields of varying
+   structures.
+ - Improved generated code for cases when `foreach` loop iteration domain is
+   less than the target width.
+
+Compiler switches behavior:
+
+ - `--pic` command line flag now corresponds to the `-fpic` flag of Clang
+   and GCC, whereas the newly introduced `--PIC` corresponds to `-fPIC`.
+
+Bug fixes:
+
+ - The implementation of `round` standard library function was aligned across
+   all targets. It may potentially affect the results of the code that uses
+   this function for the following targets: `avx2-i16x16`, `avx2-i8x32` and
+   all `avx512` targets.
+ - Fixed cases when unwind info were not generated for functions. This impacted
+   debugging and profiling on Windows.
+ - Fixed broken targets `sse4-i8xN` and `avx2-i8xN`.
+
+Recommended versions of Runtime Dependencies when targeting GPU:
+
+Linux:
+
+ - Intel(R) Graphics Compute Runtime
+   https://github.com/intel/compute-runtime/releases/tag/24.05.28454.6
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.16.9
+ - Threading Building Blocks (TBB)
+
+Alternatively, you can use a validated gfx driver stack supporting Intel® Arc™
+available at https://dgpu-docs.intel.com/driver/installation.html
+
+Windows:
+
+ - Intel(R) Graphics Windows(R) DCH Drivers 31.0.101.5518
+   https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.16.9
+ - OpenCL™ Offline Compiler (OCLOC)
+   https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+   (this is needed for AoT compilation on Windows only)
+ - Supported GPU platforms: Intel(R) Arc Graphics, 11th-13th Gen Intel(R) Core
+   processor graphics
+
+Components revisions used in GPU-enabled build:
+ - https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/89ab5df3
+ - https://github.com/intel/vc-intrinsics/commit/f9c34404
+ - https://github.com/oneapi-src/level-zero/commit/61c97c87 (v1.16.9)
+ - https://github.com/llvm/llvm-project/commit/6009708(llvmorg-17.0.6) +
+   patches from llvm_patches folder
+
+=== v1.23.0 === (14 February 2024)
+
+ISPC release with bug fixes and a few language improvements. The release is based on patched LLVM 16.0.6.
+
+Language changes:
+
+ - Improved `const` variables initialization:
+
+    1. Variables with const qualifiers can be initialized using the values of previously initialized const variables
+       including arithmetic operations above them.
+    2. Enum values can be used as constants.
+
+ - One can use the result of selection operator as lvalue now.
+
+Compiler switches behavior:
+
+ - `--dump-file=<dir>` forces now to dump the whole IR modules after each pass.
+
+ISPC Runtime improvements:
+
+ - Added `ISPCRT_GPU_DRIVER` environment variable that allows to choose the specific driver. If more than
+   one supported GPU is present in the system, they may be managed by several GPU drivers. The user can
+   select the GPU driver using this variable.
+
+Infrastructure/build changes:
+
+ - Removed the build dependency from `llvm-dis`.
+ - Lock the time zone to UTS to fix build reproducibility.
+
+Bug fixes:
+
+ - Fixed ABI compatibility of `bool` types returned to C/C++ code.
+ - Fixed build error when bison emulates POSIX Yacc.
+ - Fixed target definition for `neon-i16x8`, `sse2-i32x8` and `ps5`.
+ - Fixed ICE when generating unwind info for `aarch64` code on Windows.
+
+Recommended versions of Runtime Dependencies when targeting GPU:
+
+Linux:
+
+ - Intel(R) Graphics Compute Runtime
+   https://github.com/intel/compute-runtime/releases/tag/23.48.27912.11
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.15.1
+ - Threading Building Blocks (TBB)
+
+Alternatively, you can use a validated gfx driver stack supporting Intel® Arc™
+available at https://dgpu-docs.intel.com/driver/installation.html
+
+Windows:
+
+ - Intel(R) Graphics Windows(R) DCH Drivers 31.0.101.5194_101.5252
+   https://www.intel.com/content/www/us/en/download/785597/intel-arc-iris-xe-graphics-windows.html
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.15.1
+ - OpenCL™ Offline Compiler (OCLOC)
+   https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+   (this is needed for AoT compilation on Windows only)
+ - Supported GPU platforms: Intel(R) Arc Graphics, 11th-13th Gen Intel(R) Core
+   processor graphics
+
+Components revisions used in GPU-enabled build:
+ - https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/d1c69c33
+ - https://github.com/intel/vc-intrinsics/commit/b16218b8
+ - https://github.com/oneapi-src/level-zero/commit/ea5be99 (v1.15.1)
+ - https://github.com/llvm/llvm-project/commit/7cbf1a25(llvmorg-16.0.6) +
+   patches from llvm_patches folder
+
+=== v1.22.0 === (15 November 2023)
+
+ISPC release with template operators support; improved debugging experience of ISPC code on Windows; multiple
+stability and performance fixes and more. The release is based on patched LLVM 16.0.6.
+
+ISPC distribution changes:
+
+ - ISPC binaries were compiled with LTO by Clang/LLVM toolchain on all supported platforms and architectures using
+   superbuild. ISPC binaries got faster a few percent in average.
+ - Examples were excluded from ISPC archives. They are placed alongside as separate archives
+   `ispc-examples-v1.22.0.zip` and `ispc-examples-v1.22.0.tar.gz`.
+
+Language changes:
+
+ - Added support for template operators.
+ - Revised the usage of function specifiers with templates. For more details please refer to Function Templates
+   section of documentation.
+
+Infrastructure changes:
+
+ - Release built with LTO (except `aarch64` Linux).
+ - Supported building ISPC with LLVM 17 although GPU support wasn't tested.
+
+New compiler switches:
+
+ - `--dwarf-version` switch accepts DWARF 5 version.
+ - `--dwarf-version` switch forces DWARF format debug info generation on Windows. It allows to debug ISPC code linked
+   with MinGW generated code.
+
+Bug fixes:
+
+ - Fixed performance regression caused by missed memory effects for genx intrinsics declarations.
+ - Fixed performance regression caused by change in the loop unswitch LLVM pass.
+ - Fixed C compatibility of ISPC generated headers.
+ - Added unwind table to ISPC generated functions for Windows targets. It fixed issues with incorrect backtrace during
+   debugging and profiling.
+ - Fixed emitted code for negate of short float vectors.
+ - Fixed several issues that were related to the usage of bool in different cases.
+
+Recommended versions of Runtime Dependencies when targeting GPU:
+
+Linux:
+
+ - Intel(R) Graphics Compute Runtime
+   https://github.com/intel/compute-runtime/releases/tag/23.30.26918.9
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.14.0
+ - Threading Building Blocks (TBB)
+
+Alternatively, you can use a validated gfx driver stack supporting Intel® Arc™
+available at https://dgpu-docs.intel.com/driver/installation.html
+
+Windows:
+
+ - Intel(R) Graphics Windows(R) DCH Drivers 31.0.101.4826
+   https://www.intel.com/content/www/us/en/download/785597/788440/intel-arc-iris-xe-graphics-windows.html
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.14.0
+ - OpenCL™ Offline Compiler (OCLOC)
+   https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+   (this is needed for AoT compilation on Windows only)
+ - Supported GPU platforms: Intel(R) Arc Graphics, 11th-13th Gen Intel(R) Core
+   processor graphics
+
+Components revisions used in GPU-enabled build:
+ - https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/8ac46249
+ - https://github.com/intel/vc-intrinsics/commit/77f069b7
+ - https://github.com/oneapi-src/level-zero/commit/37363a45 (v1.14.0)
+ - https://github.com/llvm/llvm-project/commit/7cbf1a25(llvmorg-16.0.6) +
+   patches from llvm_patches folder
+
+=== v1.21.0 === (18 August 2023)
+
+ISPC release with template function specializations support; changed rules for signed integer overflow, which match
+C/C++ behavior and lead to more aggressive optimizations; an enhanced ISPC Runtime; multiple stability and performance
+fixes and more. The release is based on patched LLVM 15.0.7.
+
+Language changes:
+
+ - Added support for function template specializations with explicit template arguments.
+   For more details please refer to Function Templates section of documentation.
+
+ - Modified behavior for signed integer overflow.
+   Now, in case of signed integer overflow, `ispc` will assume undefined behavior similar to C and C++. This change may
+   cause compatibility issues. You can manage this behavior by using the `--[no-]wrap-signed-int` compiler switch. The default
+   behavior (before version 1.21.0) can be preserved by using `--wrap-signed-int`, which maintains defined wraparound
+   behavior for signed integers, though it may limit some compiler optimizations.
+
+New hardware support:
+
+Added support of Intel Meteor Lake Xe-LPG graphics:
+
+ - Added two new ISPC targets: `xelpg-x16` and `xelpg-x8`
+ - Added two new device names: `mtl-m` and `mtl-p`
+
+Infrastructure changes:
+
+ - ISPC now uses LLVM's new pass manager. Optimization pipeline was modified by introducing early LoopFullUnrollPass
+   which matches ISPC unrolled loops with manually unrolled loops in many cases.
+ - Introduced ISPC superbuild, which facilitates building ISPC with Xe dependencies (LLVM, L0, vc-intrinsics,
+   SPIRV-Translator). It can generate an archive with dependencies or consume a pre-built archive to build ISPC only.
+   It also enables generating LTO or LTO+PGO enabled builds of LLVM and ISPC.
+ - Supported building ISPC with LLVM 16.
+
+New compiler switches:
+
+ - `--mcmodel` switch, which accepts `small` and `large` values. The definition is similar to gcc/clang. When `large`
+   model is used, it enables programs larger than 2Gb.
+ - `--opt=disable-gathers` and `--opt=disable-scatters` options, which disable generation of gathers and scatters
+   instructions on platforms that support them (for performance experiments).
+ - `--[no-]wrap-signed-int` switches, which [does not] preserve(s) wrap-around behavior on signed integer overflow.
+
+ISPC Runtime improvements:
+
+ - Added `ispcrtSetTaskingCallbacks` to the ISPCRT API, allowing the override of default implementations of
+   `ISPCLaunch`, `ISPCAlloc`, and `ISPCSync`.
+ - Removed compile-time Level Zero dependency from ISPCRT, no longer necessary after the ISPCRT split into CPU and GPU
+   parts.
+
+
+Recommended versions of Runtime Dependencies when targeting GPU:
+
+Linux:
+
+ - Intel(R) Graphics Compute Runtime
+   https://github.com/intel/compute-runtime/releases/tag/23.22.26516.18
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.13.5
+ - Threading Building Blocks (TBB)
+
+Alternatively, you can use a validated gfx driver stack supporting Intel® Arc™
+available at https://dgpu-docs.intel.com/driver/installation.html
+
+Windows:
+
+ - Intel(R) Graphics Windows(R) DCH Drivers 31.0.101.4644
+   https://www.intel.com/content/www/us/en/download/726609/intel-arc-iris-xe-graphics-whql-windows.html
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.13.5
+ - OpenCL™ Offline Compiler (OCLOC)
+   https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+   (this is needed for AoT compilation on Windows only)
+ - Supported GPU platforms: Intel(R) Arc Graphics, 11th-13th Gen Intel(R) Core
+   processor graphics
+
+Components revisions used in GPU-enabled build:
+ - https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/e82ecc2
+ - https://github.com/intel/vc-intrinsics/commit/910db48
+ - https://github.com/oneapi-src/level-zero/commit/e1f09b4 (v1.13.5)
+ - https://github.com/llvm/llvm-project/commit/8dfdcc7 (llvmorg-15.0.7) +
+   patches from llvm_patches folder
+
+=== v1.20.0 === (5 May 2023)
+
+ISPC release with compile time improvements, enhancements in the ISPC Runtime,
+and a number of code generation fixes. The release is based on patched LLVM
+15.0.7.
+
+ISPC distribution changes.
+
+ISPC binaries got faster and smaller. ISPC binaries got smaller approximately
+by 1/3 and a few percent faster. The distribution macOS now includes x86_64,
+arm64 and Universal Binaries. On Linux a snap package with the latest ISPC is
+available.
+
+ISPC Runtime.
+
+ - ispcrt was split under the hood into GPU and CPU parts, which are loaded
+   dynamically. This means you don't need GPU dependencies when running CPU-only
+   code using ispcrt.
+ - ispcrt got support for fences to enable CPU/GPU asynchronous computations.
+ - ispcrt does not depend on OpenMP runtime anymore, but requires TBB.
+
+New targets.
+
+For better fine-tuning when targeting old platforms, sse4 targets were split
+into sse4.1 and sse4.2 targets. All changes are backward compatible - sse4 are
+aliased to sse4.2 and multi-target compilation allows only one of sse4 target,
+so build systems are not confused.
+
+Improvements for contributors
+
+We got a brand new Github Codespaces config, so you are welcome to start
+hacking on ISPC in browser. Give it a try!
+
+Recommended versions of Runtime Dependencies when targeting GPU.
+
+Linux:
+
+ - Intel(R) Graphics Compute Runtime
+   https://github.com/intel/compute-runtime/releases/tag/23.09.25812.14
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.10.0
+ - Threading Building Blocks (TBB)
+
+Alternatively, you can use a validated gfx driver stack supporting Intel® Arc™
+available at https://dgpu-docs.intel.com/releases/stable_602_20230323.html
+
+Windows:
+
+ - Intel(R) Graphics Windows(R) DCH Drivers 31.0.101.4146
+   https://www.intel.com/content/www/us/en/download/726609/772016/intel-arc-iris-xe-graphics-whql-windows.html
+ - Level Zero Loader
+   https://github.com/oneapi-src/level-zero/releases/tag/v1.10.0
+ - OpenCL™ Offline Compiler (OCLOC)
+   https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+   (this is needed for AoT compilation on Windows only)
+ - Supported platforms: Intel(R) Arc Graphics, 11th-13th Gen Intel(R) Core
+   processor graphics
+
+Components revisions used in GPU-enabled build:
+ - https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/855eb27
+ - https://github.com/intel/vc-intrinsics/commit/29fe787
+ - https://github.com/oneapi-src/level-zero/commit/0d56d8e (v1.10.0)
+ - https://github.com/llvm/llvm-project/commit/8dfdcc7 (llvmorg-15.0.7) +
+   patches from llvm_patches folder
+
+
+=== v1.19.0 === (28 February 2022)
+
+ISPC release with long-awaited function templates technical preview; new
+hardware support for 4th generation Intel® Xeon® Scalable (codename Sapphire
+Rapids) CPUs, Intel® Data Center GPU Max (codename Ponte Vecchio), and updated
+support for Intel® Arc™ GPUs; improved performance and compile time; an enhanced
+ISPC Runtime; a bunch of stability fixes and more. The release is based on
+patched LLVM 14.0.6.
+
+Language changes.
+
+Function templates support was introduced in ISPC and it's currently in
+technical preview, meaning that current language definition might change in
+future versions. For more details please refer to Function Templates
+section of documentation.
+
+ISPC has got several other language changes needed for ISPC/SYCL
+interoperability (an experimental feature):
+1. Support of `__regcall` attribute.
+2. A new language construct `invoke_sycl` which is used to call SYCL function
+   from ISPC. The function must be declared on ISPC side with `extern "SYCL"
+   __regcall` qualifiers.
+3. Support of `extern "C"` functions definitions.
+
+New hardware support.
+
+1. Targets for 4th generation Intel® Xeon® Scalable (codename Sapphire Rapids)
+   CPUs were introduced: `avx512spr-x4`, `avx512spr-x8`,`avx512spr-x16`,
+   `avx512spr-x32`, `avx512spr-x64`. The key difference with other AVX512 targets
+   is native support for FP16.
+2. New `xehpc-x16`/`xehpc-x32` targets were added for Intel® Data Center GPU Max
+   (codename Ponte Vecchio). A new `pvc` device name was introduced.
+3. New device names `acm-g10`, `acm-g11`, and `acm-g12` were added for Intel®
+   Arc™ Graphics. The `dg2` device name has been removed.
+4. Support for Aarch64 targets was enabled on Windows.
+
+ISPC Runtime.
+
+1. A chunking allocator was introduced that can be enabled with `ISPCRT_MEM_POOL`.
+2. An API was added to link input modules through `ispcrtStaticLinkModules`
+   (using linking on vISA level under the hood) and `ispcrtDynamicLinkModules`
+   (using binary linking under the hood).
+3. Support for creating multiple devices within a single context was added, and
+   an API was added to get a function pointer from a module. It's also possible to
+   construct ISPC RT objects from native handlers now.
+4. ISPC RT verbose mode was added that can be enabled through `ISPCRT_VERBOSE`.
+
+Performance.
+
+There's a significant performance boost on Xe targets caused by updates in the
+ISPC optimization pipeline and the usage of the new spill-cost IGC finalizer
+function, which dramatically reduces spill size.
+
+Utilities.
+
+1. ISPC `link` mode has been introduced, allowing to link several LLVM bitcode
+   or SPIR-V files and output the result as LLVM bitcode or SPIR-V. For example:
+     ispc link test_a.bc test_b.bc --emit-spirv -o test.spv
+
+2. CMake utilities was improved, and support was added for building an ISPC GPU
+   target from multiple ISPC files, linking them with `ispc --link`. An
+   application's ISPC CMakeLists would look like this:
+     add_ispc_library(my_ispc_lib filea.ispc fileb.ispc)
+     ispc_target_include_directories(my_ispc_lib <some directory path>)
+     ispc_target_compile_definitions(my_ispc_lib -DMY_DEFINE=1)
+
+     add_ispc_library(my_ispc_kernel filec.ispc)
+     ispc_target_link_libraries(my_ispc_kernel my_ispc_lib)
+
+Runtime Dependencies when targeting GPU.
+
+Linux:
+
+- Intel(R) Graphics Compute Runtime
+  https://github.com/intel/compute-runtime/releases/tag/22.49.25018.24
+- Level Zero Loader
+  https://github.com/oneapi-src/level-zero/releases/tag/v1.9.4
+- OpenMP Runtime. Consult your Linux distribution documentation for the
+  installation of OpenMP runtime instructions. No specific version is required.
+
+Windows:
+
+- Intel(R) Graphics Windows(R) DCH Drivers 30.0.101.4091
+  https://www.intel.com/content/www/us/en/download/726609/intel-arc-iris-xe-graphics-whql-windows.html
+- Level Zero Loader https://github.com/oneapi-src/level-zero/releases/tag/v1.9.4
+- OpenCL™ Offline Compiler (OCLOC)
+  https://www.intel.com/content/www/us/en/developer/articles/tool/oneapi-standalone-components.html
+  (this is needed for AoT compilation on Windows only)
+
+Components revisions used in GPU-enabled build:
+
+- https://github.com/KhronosGroup/SPIRV-LLVM-Translator/commit/c469fa8
+- https://github.com/intel/vc-intrinsics/commit/3ac855c
+- https://github.com/oneapi-src/level-zero/commit/4ed13f3 (v1.9.4)
+- https://github.com/llvm/llvm-project/commit/f28c006 (llvmorg-14.0.6) +
+  patches from llvm_patches folder
+
 === v1.18.0 === (5 May 2022)
 
 An ISPC release with a bunch of stability and performance fixes, improvements
@@ -356,7 +944,7 @@ CPU changes include:
 - "generic" targets were removed.
 - several stability fixes, including bugs discovered during fuzzing ISPC by YARPGen.
 - integer division performance improvements.
-- support for __vectorcall calling convention on Windows x64 (enabled by 
+- support for __vectorcall calling convention on Windows x64 (enabled by
   '--vectorcall')
 
 Using GPU-enabled Linux binary you can build ISPC programs and run them on Intel(R)
@@ -377,7 +965,7 @@ strongly encourage to try it out and give us feedback! You can reach us through
 Github issues, ISPC mailing list (ispc-users@googlegroups.com), or on Twitter
 (@ispc_updates).
 
-Runtime Dependencies 
+Runtime Dependencies
 - Intel(R) Graphics Compute Runtime
   https://github.com/intel/compute-runtime/releases/tag/20.29.17408
 - Level Zero Loader

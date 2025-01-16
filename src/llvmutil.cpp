@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2021, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file llvmutil.cpp
@@ -53,57 +26,60 @@
 
 namespace ispc {
 
-llvm::Type *LLVMTypes::VoidType = NULL;
-llvm::PointerType *LLVMTypes::VoidPointerType = NULL;
-llvm::Type *LLVMTypes::PointerIntType = NULL;
-llvm::Type *LLVMTypes::BoolType = NULL;
-llvm::Type *LLVMTypes::BoolStorageType = NULL;
+llvm::Type *LLVMTypes::VoidType = nullptr;
+llvm::PointerType *LLVMTypes::VoidPointerType = nullptr;
+llvm::Type *LLVMTypes::PointerIntType = nullptr;
+llvm::Type *LLVMTypes::BoolType = nullptr;
+llvm::Type *LLVMTypes::BoolStorageType = nullptr;
 
-llvm::Type *LLVMTypes::Int8Type = NULL;
-llvm::Type *LLVMTypes::Int16Type = NULL;
-llvm::Type *LLVMTypes::Int32Type = NULL;
-llvm::Type *LLVMTypes::Int64Type = NULL;
-llvm::Type *LLVMTypes::Float16Type = NULL;
-llvm::Type *LLVMTypes::FloatType = NULL;
-llvm::Type *LLVMTypes::DoubleType = NULL;
+llvm::Type *LLVMTypes::Int1Type = nullptr;
+llvm::Type *LLVMTypes::Int8Type = nullptr;
+llvm::Type *LLVMTypes::Int16Type = nullptr;
+llvm::Type *LLVMTypes::Int32Type = nullptr;
+llvm::Type *LLVMTypes::Int64Type = nullptr;
+llvm::Type *LLVMTypes::Float16Type = nullptr;
+llvm::Type *LLVMTypes::FloatType = nullptr;
+llvm::Type *LLVMTypes::DoubleType = nullptr;
+llvm::Type *LLVMTypes::PtrType = nullptr;
 
-llvm::Type *LLVMTypes::Int8PointerType = NULL;
-llvm::Type *LLVMTypes::Int16PointerType = NULL;
-llvm::Type *LLVMTypes::Int32PointerType = NULL;
-llvm::Type *LLVMTypes::Int64PointerType = NULL;
-llvm::Type *LLVMTypes::Float16PointerType = NULL;
-llvm::Type *LLVMTypes::FloatPointerType = NULL;
-llvm::Type *LLVMTypes::DoublePointerType = NULL;
+llvm::Type *LLVMTypes::Int8PointerType = nullptr;
+llvm::Type *LLVMTypes::Int16PointerType = nullptr;
+llvm::Type *LLVMTypes::Int32PointerType = nullptr;
+llvm::Type *LLVMTypes::Int64PointerType = nullptr;
+llvm::Type *LLVMTypes::Float16PointerType = nullptr;
+llvm::Type *LLVMTypes::FloatPointerType = nullptr;
+llvm::Type *LLVMTypes::DoublePointerType = nullptr;
 
-llvm::VectorType *LLVMTypes::MaskType = NULL;
-llvm::VectorType *LLVMTypes::BoolVectorType = NULL;
-llvm::VectorType *LLVMTypes::BoolVectorStorageType = NULL;
+llvm::VectorType *LLVMTypes::MaskType = nullptr;
+llvm::VectorType *LLVMTypes::BoolVectorType = nullptr;
+llvm::VectorType *LLVMTypes::BoolVectorStorageType = nullptr;
 
-llvm::VectorType *LLVMTypes::Int1VectorType = NULL;
-llvm::VectorType *LLVMTypes::Int8VectorType = NULL;
-llvm::VectorType *LLVMTypes::Int16VectorType = NULL;
-llvm::VectorType *LLVMTypes::Int32VectorType = NULL;
-llvm::VectorType *LLVMTypes::Int64VectorType = NULL;
-llvm::VectorType *LLVMTypes::Float16VectorType = NULL;
-llvm::VectorType *LLVMTypes::FloatVectorType = NULL;
-llvm::VectorType *LLVMTypes::DoubleVectorType = NULL;
+llvm::VectorType *LLVMTypes::Int1VectorType = nullptr;
+llvm::VectorType *LLVMTypes::Int8VectorType = nullptr;
+llvm::VectorType *LLVMTypes::Int16VectorType = nullptr;
+llvm::VectorType *LLVMTypes::Int32VectorType = nullptr;
+llvm::VectorType *LLVMTypes::Int64VectorType = nullptr;
+llvm::VectorType *LLVMTypes::Float16VectorType = nullptr;
+llvm::VectorType *LLVMTypes::FloatVectorType = nullptr;
+llvm::VectorType *LLVMTypes::DoubleVectorType = nullptr;
+llvm::VectorType *LLVMTypes::PtrVectorType = nullptr;
 
-llvm::Type *LLVMTypes::Int8VectorPointerType = NULL;
-llvm::Type *LLVMTypes::Int16VectorPointerType = NULL;
-llvm::Type *LLVMTypes::Int32VectorPointerType = NULL;
-llvm::Type *LLVMTypes::Int64VectorPointerType = NULL;
-llvm::Type *LLVMTypes::Float16VectorPointerType = NULL;
-llvm::Type *LLVMTypes::FloatVectorPointerType = NULL;
-llvm::Type *LLVMTypes::DoubleVectorPointerType = NULL;
+llvm::Type *LLVMTypes::Int8VectorPointerType = nullptr;
+llvm::Type *LLVMTypes::Int16VectorPointerType = nullptr;
+llvm::Type *LLVMTypes::Int32VectorPointerType = nullptr;
+llvm::Type *LLVMTypes::Int64VectorPointerType = nullptr;
+llvm::Type *LLVMTypes::Float16VectorPointerType = nullptr;
+llvm::Type *LLVMTypes::FloatVectorPointerType = nullptr;
+llvm::Type *LLVMTypes::DoubleVectorPointerType = nullptr;
 
-llvm::VectorType *LLVMTypes::VoidPointerVectorType = NULL;
+llvm::VectorType *LLVMTypes::VoidPointerVectorType = nullptr;
 
-llvm::Constant *LLVMTrue = NULL;
-llvm::Constant *LLVMFalse = NULL;
-llvm::Constant *LLVMTrueInStorage = NULL;
-llvm::Constant *LLVMFalseInStorage = NULL;
-llvm::Constant *LLVMMaskAllOn = NULL;
-llvm::Constant *LLVMMaskAllOff = NULL;
+llvm::Constant *LLVMTrue = nullptr;
+llvm::Constant *LLVMFalse = nullptr;
+llvm::Constant *LLVMTrueInStorage = nullptr;
+llvm::Constant *LLVMFalseInStorage = nullptr;
+llvm::Constant *LLVMMaskAllOn = nullptr;
+llvm::Constant *LLVMMaskAllOff = nullptr;
 
 void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
     LLVMTypes::VoidType = llvm::Type::getVoidTy(*ctx);
@@ -111,6 +87,7 @@ void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
     LLVMTypes::PointerIntType = target.is32Bit() ? llvm::Type::getInt32Ty(*ctx) : llvm::Type::getInt64Ty(*ctx);
 
     LLVMTypes::BoolType = llvm::Type::getInt1Ty(*ctx);
+    LLVMTypes::Int1Type = llvm::Type::getInt1Ty(*ctx);
     LLVMTypes::Int8Type = LLVMTypes::BoolStorageType = llvm::Type::getInt8Ty(*ctx);
     LLVMTypes::Int16Type = llvm::Type::getInt16Ty(*ctx);
     LLVMTypes::Int32Type = llvm::Type::getInt32Ty(*ctx);
@@ -118,6 +95,7 @@ void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
     LLVMTypes::Float16Type = llvm::Type::getHalfTy(*ctx);
     LLVMTypes::FloatType = llvm::Type::getFloatTy(*ctx);
     LLVMTypes::DoubleType = llvm::Type::getDoubleTy(*ctx);
+    LLVMTypes::PtrType = llvm::PointerType::get(*ctx, 0);
 
     LLVMTypes::Int8PointerType = llvm::PointerType::get(LLVMTypes::Int8Type, 0);
     LLVMTypes::Int16PointerType = llvm::PointerType::get(LLVMTypes::Int16Type, 0);
@@ -161,6 +139,7 @@ void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
     LLVMTypes::Float16VectorType = LLVMVECTOR::get(LLVMTypes::Float16Type, target.getVectorWidth());
     LLVMTypes::FloatVectorType = LLVMVECTOR::get(LLVMTypes::FloatType, target.getVectorWidth());
     LLVMTypes::DoubleVectorType = LLVMVECTOR::get(LLVMTypes::DoubleType, target.getVectorWidth());
+    LLVMTypes::PtrVectorType = LLVMVECTOR::get(LLVMTypes::PtrType, target.getVectorWidth());
 
     LLVMTypes::Int8VectorPointerType = llvm::PointerType::get(LLVMTypes::Int8VectorType, 0);
     LLVMTypes::Int16VectorPointerType = llvm::PointerType::get(LLVMTypes::Int16VectorType, 0);
@@ -178,7 +157,7 @@ void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
     LLVMFalseInStorage = llvm::ConstantInt::get(LLVMTypes::Int8Type, 0x00, false /*unsigned*/);
 
     std::vector<llvm::Constant *> maskOnes;
-    llvm::Constant *onMask = NULL;
+    llvm::Constant *onMask = nullptr;
     switch (target.getMaskBitCount()) {
     case 1:
         onMask = llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 1, false /*unsigned*/); // 0x1
@@ -199,12 +178,13 @@ void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
         FATAL("Unhandled mask width for onMask");
     }
 
-    for (int i = 0; i < target.getVectorWidth(); ++i)
+    for (int i = 0; i < target.getVectorWidth(); ++i) {
         maskOnes.push_back(onMask);
+    }
     LLVMMaskAllOn = llvm::ConstantVector::get(maskOnes);
 
     std::vector<llvm::Constant *> maskZeros;
-    llvm::Constant *offMask = NULL;
+    llvm::Constant *offMask = nullptr;
     switch (target.getMaskBitCount()) {
     case 1:
         offMask = llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0, true /*signed*/);
@@ -224,9 +204,15 @@ void InitLLVMUtil(llvm::LLVMContext *ctx, Target &target) {
     default:
         FATAL("Unhandled mask width for offMask");
     }
-    for (int i = 0; i < target.getVectorWidth(); ++i)
+    for (int i = 0; i < target.getVectorWidth(); ++i) {
         maskZeros.push_back(offMask);
+    }
     LLVMMaskAllOff = llvm::ConstantVector::get(maskZeros);
+}
+
+llvm::ConstantInt *LLVMInt1(bool val) {
+    int ival = val ? -1 : 0;
+    return llvm::ConstantInt::get(llvm::Type::getInt1Ty(*g->ctx), ival, true /*signed*/);
 }
 
 llvm::ConstantInt *LLVMInt8(int8_t ival) {
@@ -267,205 +253,245 @@ llvm::Constant *LLVMFloat(llvm::APFloat fval) { return llvm::ConstantFP::get(llv
 
 llvm::Constant *LLVMDouble(llvm::APFloat dval) { return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*g->ctx), dval); }
 
+llvm::Constant *LLVMInt1Vector(bool ival) {
+    llvm::Constant *v = LLVMInt1(ival);
+    std::vector<llvm::Constant *> vals;
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
+        vals.push_back(v);
+    }
+    return llvm::ConstantVector::get(vals);
+}
+
+llvm::Constant *LLVMInt1Vector(const bool *ivec) {
+    std::vector<llvm::Constant *> vals;
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
+        vals.push_back(LLVMInt1(ivec[i]));
+    }
+    return llvm::ConstantVector::get(vals);
+}
+
 llvm::Constant *LLVMInt8Vector(int8_t ival) {
     llvm::Constant *v = LLVMInt8(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt8Vector(const int8_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMInt8(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt8Vector(uint8_t ival) {
     llvm::Constant *v = LLVMUInt8(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt8Vector(const uint8_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMUInt8(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt16Vector(int16_t ival) {
     llvm::Constant *v = LLVMInt16(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt16Vector(const int16_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMInt16(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt16Vector(uint16_t ival) {
     llvm::Constant *v = LLVMUInt16(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt16Vector(const uint16_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMUInt16(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt32Vector(int32_t ival) {
     llvm::Constant *v = LLVMInt32(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt32Vector(const int32_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMInt32(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt32Vector(uint32_t ival) {
     llvm::Constant *v = LLVMUInt32(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt32Vector(const uint32_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMUInt32(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMFloat16Vector(llvm::APFloat fval) {
     llvm::Constant *v = LLVMFloat16(fval);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMFloat16Vector(const std::vector<llvm::APFloat> &fvec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMFloat16(fvec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMFloatVector(llvm::APFloat fval) {
     llvm::Constant *v = LLVMFloat(fval);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMFloatVector(const std::vector<llvm::APFloat> &fvec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMFloat(fvec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMDoubleVector(llvm::APFloat dval) {
     llvm::Constant *v = LLVMDouble(dval);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMDoubleVector(const std::vector<llvm::APFloat> &dvec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMDouble(dvec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt64Vector(int64_t ival) {
     llvm::Constant *v = LLVMInt64(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMInt64Vector(const int64_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMInt64(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt64Vector(uint64_t ival) {
     llvm::Constant *v = LLVMUInt64(ival);
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMUInt64Vector(const uint64_t *ivec) {
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(LLVMUInt64(ivec[i]));
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMBoolVector(bool b) {
-    llvm::Constant *v;
-    if (LLVMTypes::BoolVectorType == LLVMTypes::Int64VectorType)
+    llvm::Constant *v = nullptr;
+    if (LLVMTypes::BoolVectorType == LLVMTypes::Int64VectorType) {
         v = llvm::ConstantInt::get(LLVMTypes::Int64Type, b ? 0xffffffffffffffffull : 0, false /*unsigned*/);
-    else if (LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
+    } else if (LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType) {
         v = llvm::ConstantInt::get(LLVMTypes::Int32Type, b ? 0xffffffff : 0, false /*unsigned*/);
-    else if (LLVMTypes::BoolVectorType == LLVMTypes::Int16VectorType)
+    } else if (LLVMTypes::BoolVectorType == LLVMTypes::Int16VectorType) {
         v = llvm::ConstantInt::get(LLVMTypes::Int16Type, b ? 0xffff : 0, false /*unsigned*/);
-    else if (LLVMTypes::BoolVectorType == LLVMTypes::Int8VectorType)
+    } else if (LLVMTypes::BoolVectorType == LLVMTypes::Int8VectorType) {
         v = llvm::ConstantInt::get(LLVMTypes::Int8Type, b ? 0xff : 0, false /*unsigned*/);
-    else {
+    } else {
         Assert(LLVMTypes::BoolVectorType == LLVMTypes::Int1VectorType);
         v = b ? LLVMTrue : LLVMFalse;
     }
 
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
 llvm::Constant *LLVMBoolVector(const bool *bvec) {
     std::vector<llvm::Constant *> vals;
     for (int i = 0; i < g->target->getVectorWidth(); ++i) {
-        llvm::Constant *v;
-        if (LLVMTypes::BoolVectorType == LLVMTypes::Int64VectorType)
+        llvm::Constant *v = nullptr;
+        if (LLVMTypes::BoolVectorType == LLVMTypes::Int64VectorType) {
             v = llvm::ConstantInt::get(LLVMTypes::Int64Type, bvec[i] ? 0xffffffffffffffffull : 0, false /*unsigned*/);
-        else if (LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
+        } else if (LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType) {
             v = llvm::ConstantInt::get(LLVMTypes::Int32Type, bvec[i] ? 0xffffffff : 0, false /*unsigned*/);
-        else if (LLVMTypes::BoolVectorType == LLVMTypes::Int16VectorType)
+        } else if (LLVMTypes::BoolVectorType == LLVMTypes::Int16VectorType) {
             v = llvm::ConstantInt::get(LLVMTypes::Int16Type, bvec[i] ? 0xffff : 0, false /*unsigned*/);
-        else if (LLVMTypes::BoolVectorType == LLVMTypes::Int8VectorType)
+        } else if (LLVMTypes::BoolVectorType == LLVMTypes::Int8VectorType) {
             v = llvm::ConstantInt::get(LLVMTypes::Int8Type, bvec[i] ? 0xff : 0, false /*unsigned*/);
-        else {
+        } else {
             Assert(LLVMTypes::BoolVectorType == LLVMTypes::Int1VectorType);
             v = bvec[i] ? LLVMTrue : LLVMFalse;
         }
@@ -478,8 +504,9 @@ llvm::Constant *LLVMBoolVector(const bool *bvec) {
 llvm::Constant *LLVMBoolVectorInStorage(bool b) {
     llvm::Constant *v = b ? LLVMTrueInStorage : LLVMFalseInStorage;
     std::vector<llvm::Constant *> vals;
-    for (int i = 0; i < g->target->getVectorWidth(); ++i)
+    for (int i = 0; i < g->target->getVectorWidth(); ++i) {
         vals.push_back(v);
+    }
     return llvm::ConstantVector::get(vals);
 }
 
@@ -493,37 +520,50 @@ llvm::Constant *LLVMBoolVectorInStorage(const bool *bvec) {
 }
 
 llvm::Constant *LLVMIntAsType(int64_t val, llvm::Type *type) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vecType = llvm::dyn_cast<llvm::FixedVectorType>(type);
-#else
-    llvm::VectorType *vecType = llvm::dyn_cast<llvm::VectorType>(type);
-#endif
 
-    if (vecType != NULL) {
+    if (vecType != nullptr) {
         llvm::Constant *v = llvm::ConstantInt::get(vecType->getElementType(), val, true /* signed */);
         std::vector<llvm::Constant *> vals;
-        for (int i = 0; i < (int)vecType->getNumElements(); ++i)
+        for (int i = 0; i < (int)vecType->getNumElements(); ++i) {
             vals.push_back(v);
+        }
         return llvm::ConstantVector::get(vals);
-    } else
+    } else {
         return llvm::ConstantInt::get(type, val, true /* signed */);
+    }
 }
 
 llvm::Constant *LLVMUIntAsType(uint64_t val, llvm::Type *type) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vecType = llvm::dyn_cast<llvm::FixedVectorType>(type);
-#else
-    llvm::VectorType *vecType = llvm::dyn_cast<llvm::VectorType>(type);
-#endif
 
-    if (vecType != NULL) {
+    if (vecType != nullptr) {
         llvm::Constant *v = llvm::ConstantInt::get(vecType->getElementType(), val, false /* unsigned */);
         std::vector<llvm::Constant *> vals;
-        for (int i = 0; i < (int)vecType->getNumElements(); ++i)
+        for (int i = 0; i < (int)vecType->getNumElements(); ++i) {
             vals.push_back(v);
+        }
         return llvm::ConstantVector::get(vals);
-    } else
+    } else {
         return llvm::ConstantInt::get(type, val, false /* unsigned */);
+    }
+}
+
+llvm::Constant *LLVMFPZeroAsType(llvm::Type *type) {
+    llvm::FixedVectorType *vecType = llvm::dyn_cast<llvm::FixedVectorType>(type);
+
+    if (vecType != nullptr) {
+        llvm::APFloat zf = llvm::APFloat::getZero(vecType->getElementType()->getFltSemantics());
+        llvm::Constant *v = llvm::ConstantFP::get(vecType->getElementType(), zf);
+        std::vector<llvm::Constant *> vals;
+        for (int i = 0; i < (int)vecType->getNumElements(); ++i) {
+            vals.push_back(v);
+        }
+        return llvm::ConstantVector::get(vals);
+    } else {
+        llvm::APFloat zf = llvm::APFloat::getZero(type->getFltSemantics());
+        return llvm::ConstantFP::get(type, zf);
+    }
 }
 
 /** Conservative test to see if two llvm::Values are equal.  There are
@@ -537,36 +577,42 @@ static bool lValuesAreEqual(llvm::Value *v0, llvm::Value *v1, std::vector<llvm::
     // constants (of all sorts, even constant expressions), this first test
     // actually catches a lot of cases.  LLVM's SSA form also helps a lot
     // with this..
-    if (v0 == v1)
+    if (v0 == v1) {
         return true;
+    }
 
     Assert(seenPhi0.size() == seenPhi1.size());
-    for (unsigned int i = 0; i < seenPhi0.size(); ++i)
-        if (v0 == seenPhi0[i] && v1 == seenPhi1[i])
+    for (unsigned int i = 0; i < seenPhi0.size(); ++i) {
+        if (v0 == seenPhi0[i] && v1 == seenPhi1[i]) {
             return true;
+        }
+    }
 
     llvm::BinaryOperator *bo0 = llvm::dyn_cast<llvm::BinaryOperator>(v0);
     llvm::BinaryOperator *bo1 = llvm::dyn_cast<llvm::BinaryOperator>(v1);
-    if (bo0 != NULL && bo1 != NULL) {
-        if (bo0->getOpcode() != bo1->getOpcode())
+    if (bo0 != nullptr && bo1 != nullptr) {
+        if (bo0->getOpcode() != bo1->getOpcode()) {
             return false;
+        }
         return (lValuesAreEqual(bo0->getOperand(0), bo1->getOperand(0), seenPhi0, seenPhi1) &&
                 lValuesAreEqual(bo0->getOperand(1), bo1->getOperand(1), seenPhi0, seenPhi1));
     }
 
     llvm::CastInst *cast0 = llvm::dyn_cast<llvm::CastInst>(v0);
     llvm::CastInst *cast1 = llvm::dyn_cast<llvm::CastInst>(v1);
-    if (cast0 != NULL && cast1 != NULL) {
-        if (cast0->getOpcode() != cast1->getOpcode())
+    if (cast0 != nullptr && cast1 != nullptr) {
+        if (cast0->getOpcode() != cast1->getOpcode()) {
             return false;
+        }
         return lValuesAreEqual(cast0->getOperand(0), cast1->getOperand(0), seenPhi0, seenPhi1);
     }
 
     llvm::PHINode *phi0 = llvm::dyn_cast<llvm::PHINode>(v0);
     llvm::PHINode *phi1 = llvm::dyn_cast<llvm::PHINode>(v1);
-    if (phi0 != NULL && phi1 != NULL) {
-        if (phi0->getNumIncomingValues() != phi1->getNumIncomingValues())
+    if (phi0 != nullptr && phi1 != nullptr) {
+        if (phi0->getNumIncomingValues() != phi1->getNumIncomingValues()) {
             return false;
+        }
 
         seenPhi0.push_back(phi0);
         seenPhi1.push_back(phi1);
@@ -613,13 +659,15 @@ static bool lIsFirstElementConstVector(llvm::Value *v) {
     // Need to understand what initial intent was here (what instruction supposed to be handled).
     // TODO: after fixing FIXME above isXeTarget() needs to be removed.
     if (g->target->isXeTarget()) {
-        if (cv == NULL && llvm::isa<llvm::Instruction>(v)) {
-            cv = llvm::dyn_cast<llvm::ConstantVector>(llvm::dyn_cast<llvm::Instruction>(v)->getOperand(1));
+        if (cv == nullptr && llvm::isa<llvm::Instruction>(v)) {
+            llvm::Instruction *inst = llvm::dyn_cast<llvm::Instruction>(v);
+            Assert(inst);
+            cv = llvm::dyn_cast<llvm::ConstantVector>(inst->getOperand(1));
         }
     }
-    if (cv != NULL) {
+    if (cv != nullptr) {
         llvm::Constant *c = llvm::dyn_cast<llvm::Constant>(cv->getOperand(0));
-        if (c == NULL) {
+        if (c == nullptr) {
             return false;
         }
 
@@ -640,19 +688,19 @@ llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, bool com
     // Catch a pattern of InsertElement chain.
     if (llvm::InsertElementInst *ie = llvm::dyn_cast<llvm::InsertElementInst>(inst)) {
         // Gather elements of vector
-        while (ie != NULL) {
+        while (ie != nullptr) {
             int64_t iOffset = lGetIntValue(ie->getOperand(2));
             Assert(iOffset >= 0 && iOffset < vectorWidth);
 
             // Get the scalar value from this insert
-            if (elements[iOffset] == NULL) {
+            if (elements[iOffset] == nullptr) {
                 elements[iOffset] = ie->getOperand(1);
             }
 
             // Do we have another insert?
             llvm::Value *insertBase = ie->getOperand(0);
             ie = llvm::dyn_cast<llvm::InsertElementInst>(insertBase);
-            if (ie != NULL) {
+            if (ie != nullptr) {
                 continue;
             }
 
@@ -662,20 +710,20 @@ llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, bool com
 
             if (llvm::isa<llvm::ConstantVector>(insertBase) || llvm::isa<llvm::ConstantAggregateZero>(insertBase)) {
                 llvm::Constant *cv = llvm::dyn_cast<llvm::Constant>(insertBase);
-                Assert(vectorWidth == (int)(cv->getNumOperands()));
+                Assert(cv && vectorWidth == (int)(cv->getNumOperands()));
                 for (int i = 0; i < vectorWidth; i++) {
-                    if (elements[i] == NULL) {
+                    if (elements[i] == nullptr) {
                         elements[i] = cv->getOperand(i);
                     }
                 }
                 break;
             } else {
                 // Here chain ends in llvm::LoadInst or some other.
-                // They are not equal to each other so we should return NULL if compare
+                // They are not equal to each other so we should return nullptr if compare
                 // and first element if we have it.
-                Assert(compare == true || elements[0] != NULL);
+                Assert(compare == true || elements[0] != nullptr);
                 if (compare) {
-                    return NULL;
+                    return nullptr;
                 } else {
                     return elements[0];
                 }
@@ -691,31 +739,31 @@ llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, bool com
         int null_number = 0;
         int NonNull = 0;
         for (int i = 0; i < vectorWidth; i++) {
-            if (elements[i] == NULL) {
+            if (elements[i] == nullptr) {
                 null_number++;
             } else {
                 NonNull = i;
             }
         }
         if (null_number == vectorWidth) {
-            // All of elements are NULLs
-            return NULL;
+            // All of elements are nullptrs
+            return nullptr;
         }
         if ((undef == false) && (null_number != 0)) {
-            // We don't want NULLs in chain, but we have them
-            return NULL;
+            // We don't want nullptrs in chain, but we have them
+            return nullptr;
         }
 
         // Compare elements of vector
         for (int i = 0; i < vectorWidth; i++) {
-            if (elements[i] == NULL) {
+            if (elements[i] == nullptr) {
                 continue;
             }
 
             std::vector<llvm::PHINode *> seenPhi0;
             std::vector<llvm::PHINode *> seenPhi1;
             if (lValuesAreEqual(elements[NonNull], elements[i], seenPhi0, seenPhi1) == false) {
-                return NULL;
+                return nullptr;
             }
         }
         return elements[NonNull];
@@ -731,19 +779,15 @@ llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, bool com
     //              <i64 4, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef, i64 undef>
     //   %gep_offset = shufflevector <8 x i64> %0, <8 x i64> undef, <8 x i32> zeroinitializer
     else if (llvm::ShuffleVectorInst *shuf = llvm::dyn_cast<llvm::ShuffleVectorInst>(inst)) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
         llvm::Value *indices = shuf->getShuffleMaskForBitcode();
-#else
-        llvm::Value *indices = shuf->getOperand(2);
-#endif
 
         if (llvm::isa<llvm::ConstantAggregateZero>(indices)) {
             llvm::Value *op = shuf->getOperand(0);
             llvm::InsertElementInst *ie = llvm::dyn_cast<llvm::InsertElementInst>(op);
-            if (ie == NULL && searchFirstUndef) {
+            if (ie == nullptr && searchFirstUndef) {
                 // Trying to recognize 2nd pattern
                 llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(op);
-                if (bop != NULL && ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop))) {
+                if (bop != nullptr && ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop))) {
                     if (lIsFirstElementConstVector(bop->getOperand(1))) {
                         ie = llvm::dyn_cast<llvm::InsertElementInst>(bop->getOperand(0));
                     } else if (llvm::isa<llvm::InsertElementInst>(bop->getOperand(1))) {
@@ -752,46 +796,46 @@ llvm::Value *LLVMFlattenInsertChain(llvm::Value *inst, int vectorWidth, bool com
                     }
                 }
             }
-            if (ie != NULL && llvm::isa<llvm::UndefValue>(ie->getOperand(0))) {
+            if (ie != nullptr && llvm::isa<llvm::UndefValue>(ie->getOperand(0))) {
                 llvm::ConstantInt *ci = llvm::dyn_cast<llvm::ConstantInt>(ie->getOperand(2));
+                Assert(ci);
                 if (ci->isZero()) {
                     return ie->getOperand(1);
                 }
             }
         }
     }
-    return NULL;
+    return nullptr;
 }
 
 bool LLVMExtractVectorInts(llvm::Value *v, int64_t ret[], int *nElts) {
     // Make sure we do in fact have a vector of integer values here
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vt = llvm::dyn_cast<llvm::FixedVectorType>(v->getType());
-#else
-    llvm::VectorType *vt = llvm::dyn_cast<llvm::VectorType>(v->getType());
-#endif
-    Assert(vt != NULL);
+    Assert(vt != nullptr);
     Assert(llvm::isa<llvm::IntegerType>(vt->getElementType()));
 
     *nElts = (int)vt->getNumElements();
 
     if (llvm::isa<llvm::ConstantAggregateZero>(v)) {
-        for (int i = 0; i < (int)vt->getNumElements(); ++i)
+        for (int i = 0; i < (int)vt->getNumElements(); ++i) {
             ret[i] = 0;
+        }
         return true;
     }
 
     llvm::ConstantDataVector *cv = llvm::dyn_cast<llvm::ConstantDataVector>(v);
-    if (cv == NULL)
+    if (cv == nullptr) {
         return false;
+    }
 
-    for (int i = 0; i < (int)cv->getNumElements(); ++i)
+    for (int i = 0; i < (int)cv->getNumElements(); ++i) {
         ret[i] = cv->getElementAsInteger(i);
+    }
     return true;
 }
 
 static bool lVectorValuesAllEqual(llvm::Value *v, int vectorLength, std::vector<llvm::PHINode *> &seenPhis,
-                                  llvm::Value **splatValue = NULL);
+                                  llvm::Value **splatValue = nullptr);
 
 /** This function checks to see if the given (scalar or vector) value is an
     exact multiple of baseValue.  It returns true if so, and false if not
@@ -805,10 +849,12 @@ static bool lIsExactMultiple(llvm::Value *val, int baseValue, int vectorLength,
         // If we've worked down to a constant int, then the moment of truth
         // has arrived...
         llvm::ConstantInt *ci = llvm::dyn_cast<llvm::ConstantInt>(val);
-        if (ci != NULL)
+        if (ci != nullptr) {
             return (ci->getZExtValue() % baseValue) == 0;
-    } else
+        }
+    } else {
         Assert(LLVMVectorValuesAllEqual(val));
+    }
 
     if (llvm::isa<llvm::InsertElementInst>(val) || llvm::isa<llvm::ShuffleVectorInst>(val)) {
         llvm::Value *element = LLVMFlattenInsertChain(val, g->target->getVectorWidth());
@@ -818,10 +864,12 @@ static bool lIsExactMultiple(llvm::Value *val, int baseValue, int vectorLength,
     }
 
     llvm::PHINode *phi = llvm::dyn_cast<llvm::PHINode>(val);
-    if (phi != NULL) {
-        for (unsigned int i = 0; i < seenPhis.size(); ++i)
-            if (phi == seenPhis[i])
+    if (phi != nullptr) {
+        for (unsigned int i = 0; i < seenPhis.size(); ++i) {
+            if (phi == seenPhis[i]) {
                 return true;
+            }
+        }
 
         seenPhis.push_back(phi);
         unsigned int numIncoming = phi->getNumIncomingValues();
@@ -841,7 +889,7 @@ static bool lIsExactMultiple(llvm::Value *val, int baseValue, int vectorLength,
     }
 
     llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(val);
-    if (bop != NULL && ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop))) {
+    if (bop != nullptr && ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop))) {
         llvm::Value *op0 = bop->getOperand(0);
         llvm::Value *op1 = bop->getOperand(1);
 
@@ -880,27 +928,32 @@ static bool lAllDivBaseEqual(llvm::Value *val, int64_t baseValue, int vectorLeng
     Assert(baseValue > 0 && (baseValue & (baseValue - 1)) == 0);
 
     // The easy case
-    if (lVectorValuesAllEqual(val, vectorLength, seenPhis))
+    if (lVectorValuesAllEqual(val, vectorLength, seenPhis)) {
         return true;
+    }
 
     int64_t vecVals[ISPC_MAX_NVEC];
-    int nElts;
+    int nElts = 0;
     if (llvm::isa<llvm::VectorType>(val->getType()) && LLVMExtractVectorInts(val, vecVals, &nElts)) {
         // If we have a vector of compile-time constant integer values,
         // then go ahead and check them directly..
         int64_t firstDiv = vecVals[0] / baseValue;
-        for (int i = 1; i < nElts; ++i)
-            if ((vecVals[i] / baseValue) != firstDiv)
+        for (int i = 1; i < nElts; ++i) {
+            if ((vecVals[i] / baseValue) != firstDiv) {
                 return false;
+            }
+        }
 
         return true;
     }
 
     llvm::PHINode *phi = llvm::dyn_cast<llvm::PHINode>(val);
-    if (phi != NULL) {
-        for (unsigned int i = 0; i < seenPhis.size(); ++i)
-            if (phi == seenPhis[i])
+    if (phi != nullptr) {
+        for (unsigned int i = 0; i < seenPhis.size(); ++i) {
+            if (phi == seenPhis[i]) {
                 return true;
+            }
+        }
 
         seenPhis.push_back(phi);
         unsigned int numIncoming = phi->getNumIncomingValues();
@@ -921,7 +974,8 @@ static bool lAllDivBaseEqual(llvm::Value *val, int64_t baseValue, int vectorLeng
     }
 
     llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(val);
-    if (bop != NULL && ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop)) && canAdd == true) {
+    if (bop != nullptr && ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop)) &&
+        canAdd == true) {
         llvm::Value *op0 = bop->getOperand(0);
         llvm::Value *op1 = bop->getOperand(1);
 
@@ -935,18 +989,22 @@ static bool lAllDivBaseEqual(llvm::Value *val, int64_t baseValue, int vectorLeng
         //   baseValue.
 
         int64_t addConstants[ISPC_MAX_NVEC];
-        if (LLVMExtractVectorInts(op1, addConstants, &nElts) == false)
+        if (LLVMExtractVectorInts(op1, addConstants, &nElts) == false) {
             return false;
+        }
         Assert(nElts == vectorLength);
 
         // Do all of them give the same value when divided by baseValue?
         int64_t firstConstDiv = addConstants[0] / baseValue;
-        for (int i = 1; i < vectorLength; ++i)
-            if ((addConstants[i] / baseValue) != firstConstDiv)
+        for (int i = 1; i < vectorLength; ++i) {
+            if ((addConstants[i] / baseValue) != firstConstDiv) {
                 return false;
+            }
+        }
 
-        if (lVectorValuesAllEqual(op0, vectorLength, seenPhis) == false)
+        if (lVectorValuesAllEqual(op0, vectorLength, seenPhis) == false) {
             return false;
+        }
 
         // Note that canAdd is a reference parameter; setting this ensures
         // that we don't allow multiple adds in other parts of the chain of
@@ -973,8 +1031,9 @@ static bool lAllDivBaseEqual(llvm::Value *val, int64_t baseValue, int vectorLeng
         // next power of 2, we'll have a value that will be no greater than
         // baseValue and sometimes less.
         int maxMod = int(addConstants[0] % baseValue);
-        for (int i = 1; i < vectorLength; ++i)
+        for (int i = 1; i < vectorLength; ++i) {
             maxMod = std::max(maxMod, int(addConstants[i] % baseValue));
+        }
         int requiredAlignment = lRoundUpPow2(maxMod);
 
         std::vector<llvm::PHINode *> seenPhisEEM;
@@ -996,15 +1055,18 @@ static bool lVectorShiftRightAllEqual(llvm::Value *val, llvm::Value *shift, int 
     // Are we shifting all elements by a compile-time constant amount?  If
     // not, give up.
     int64_t shiftAmount[ISPC_MAX_NVEC];
-    int nElts;
-    if (LLVMExtractVectorInts(shift, shiftAmount, &nElts) == false)
+    int nElts = 0;
+    if (LLVMExtractVectorInts(shift, shiftAmount, &nElts) == false) {
         return false;
+    }
     Assert(nElts == vectorLength);
 
     // Is it the same amount for all elements?
-    for (int i = 0; i < vectorLength; ++i)
-        if (shiftAmount[i] != shiftAmount[0])
+    for (int i = 0; i < vectorLength; ++i) {
+        if (shiftAmount[i] != shiftAmount[0]) {
             return false;
+        }
+    }
 
     // Now see if the value divided by (1 << shift) can be determined to
     // have the same value for all vector elements.
@@ -1012,19 +1074,14 @@ static bool lVectorShiftRightAllEqual(llvm::Value *val, llvm::Value *shift, int 
     bool canAdd = true;
     std::vector<llvm::PHINode *> seenPhis;
     bool eq = lAllDivBaseEqual(val, pow2, vectorLength, seenPhis, canAdd);
-#if 0
-    fprintf(stderr, "check all div base equal:\n");
-    LLVMDumpValue(shift);
-    LLVMDumpValue(val);
-    fprintf(stderr, "----> %s\n\n", eq ? "true" : "false");
-#endif
     return eq;
 }
 
 static bool lVectorValuesAllEqual(llvm::Value *v, int vectorLength, std::vector<llvm::PHINode *> &seenPhis,
                                   llvm::Value **splatValue) {
-    if (vectorLength == 1)
+    if (vectorLength == 1) {
         return true;
+    }
 
     if (llvm::isa<llvm::ConstantAggregateZero>(v)) {
         if (splatValue) {
@@ -1035,52 +1092,57 @@ static bool lVectorValuesAllEqual(llvm::Value *v, int vectorLength, std::vector<
     }
 
     llvm::ConstantVector *cv = llvm::dyn_cast<llvm::ConstantVector>(v);
-    if (cv != NULL) {
+    if (cv != nullptr) {
         llvm::Value *splat = cv->getSplatValue();
-        if (splat != NULL && splatValue) {
+        if (splat != nullptr && splatValue) {
             *splatValue = splat;
         }
-        return (splat != NULL);
+        return (splat != nullptr);
     }
 
     llvm::ConstantDataVector *cdv = llvm::dyn_cast<llvm::ConstantDataVector>(v);
-    if (cdv != NULL) {
+    if (cdv != nullptr) {
         llvm::Value *splat = cdv->getSplatValue();
-        if (splat != NULL && splatValue) {
+        if (splat != nullptr && splatValue) {
             *splatValue = splat;
         }
-        return (splat != NULL);
+        return (splat != nullptr);
     }
 
     llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(v);
-    if (bop != NULL) {
+    if (bop != nullptr) {
         // Easy case: both operands are all equal -> return true
         if (lVectorValuesAllEqual(bop->getOperand(0), vectorLength, seenPhis) &&
-            lVectorValuesAllEqual(bop->getOperand(1), vectorLength, seenPhis))
+            lVectorValuesAllEqual(bop->getOperand(1), vectorLength, seenPhis)) {
             return true;
+        }
 
         // If it's a shift, take a special path that tries to check if the
         // high (surviving) bits of the values are equal.
-        if (bop->getOpcode() == llvm::Instruction::AShr || bop->getOpcode() == llvm::Instruction::LShr)
+        if (bop->getOpcode() == llvm::Instruction::AShr || bop->getOpcode() == llvm::Instruction::LShr) {
             return lVectorShiftRightAllEqual(bop->getOperand(0), bop->getOperand(1), vectorLength);
+        }
 
         return false;
     }
 
     llvm::CastInst *cast = llvm::dyn_cast<llvm::CastInst>(v);
-    if (cast != NULL)
+    if (cast != nullptr) {
         return lVectorValuesAllEqual(cast->getOperand(0), vectorLength, seenPhis);
+    }
 
     llvm::InsertElementInst *ie = llvm::dyn_cast<llvm::InsertElementInst>(v);
-    if (ie != NULL) {
-        return (LLVMFlattenInsertChain(ie, vectorLength) != NULL);
+    if (ie != nullptr) {
+        return (LLVMFlattenInsertChain(ie, vectorLength) != nullptr);
     }
 
     llvm::PHINode *phi = llvm::dyn_cast<llvm::PHINode>(v);
     if (phi) {
-        for (unsigned int i = 0; i < seenPhis.size(); ++i)
-            if (seenPhis[i] == phi)
+        for (unsigned int i = 0; i < seenPhis.size(); ++i) {
+            if (seenPhis[i] == phi) {
                 return true;
+            }
+        }
 
         seenPhis.push_back(phi);
 
@@ -1098,43 +1160,30 @@ static bool lVectorValuesAllEqual(llvm::Value *v, int vectorLength, std::vector<
         return true;
     }
 
-    if (llvm::isa<llvm::UndefValue>(v))
+    if (llvm::isa<llvm::UndefValue>(v)) {
         // ?
         return false;
+    }
 
     Assert(!llvm::isa<llvm::Constant>(v));
 
-    if (llvm::isa<llvm::CallInst>(v) || llvm::isa<llvm::LoadInst>(v) || !llvm::isa<llvm::Instruction>(v))
+    if (llvm::isa<llvm::CallInst>(v) || llvm::isa<llvm::LoadInst>(v) || !llvm::isa<llvm::Instruction>(v)) {
         return false;
+    }
 
     llvm::ShuffleVectorInst *shuffle = llvm::dyn_cast<llvm::ShuffleVectorInst>(v);
-    if (shuffle != NULL) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
+    if (shuffle != nullptr) {
         llvm::Value *indices = shuffle->getShuffleMaskForBitcode();
-#else
-        llvm::Value *indices = shuffle->getOperand(2);
-#endif
 
-        if (lVectorValuesAllEqual(indices, vectorLength, seenPhis))
+        if (lVectorValuesAllEqual(indices, vectorLength, seenPhis)) {
             // The easy case--just a smear of the same element across the
             // whole vector.
             return true;
+        }
 
         // TODO: handle more general cases?
         return false;
     }
-
-#if 0
-    fprintf(stderr, "all equal: ");
-    v->dump();
-    fprintf(stderr, "\n");
-    llvm::Instruction *inst = llvm::dyn_cast<llvm::Instruction>(v);
-    if (inst) {
-        inst->getParent()->dump();
-        fprintf(stderr, "\n");
-        fprintf(stderr, "\n");
-    }
-#endif
 
     return false;
 }
@@ -1144,22 +1193,17 @@ static bool lVectorValuesAllEqual(llvm::Value *v, int vectorLength, std::vector<
     where the values are actually all equal.
 */
 bool LLVMVectorValuesAllEqual(llvm::Value *v, llvm::Value **splat) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vt = llvm::dyn_cast<llvm::FixedVectorType>(v->getType());
-#else
-    llvm::VectorType *vt = llvm::dyn_cast<llvm::VectorType>(v->getType());
-#endif
-    Assert(vt != NULL);
+    Assert(vt != nullptr);
     int vectorLength = vt->getNumElements();
 
     std::vector<llvm::PHINode *> seenPhis;
     bool equal = lVectorValuesAllEqual(v, vectorLength, seenPhis, splat);
 
     Debug(SourcePos(), "LLVMVectorValuesAllEqual(%s) -> %s.", v->getName().str().c_str(), equal ? "true" : "false");
-#ifndef ISPC_NO_DUMPS
-    if (g->debugPrint)
+    if (g->debugPrint) {
         LLVMDumpValue(v);
-#endif
+    }
 
     return equal;
 }
@@ -1168,7 +1212,7 @@ bool LLVMVectorValuesAllEqual(llvm::Value *v, llvm::Value **splat) {
 bool IsOrEquivalentToAdd(llvm::Value *op) {
     bool isEq = false;
     llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(op);
-    if (bop != NULL && bop->getOpcode() == llvm::Instruction::Or) {
+    if (bop != nullptr && bop->getOpcode() == llvm::Instruction::Or) {
         // Special case when A+B --> A|B transformation is triggered
         // We need to prove that A|B == A+B
         llvm::Module *module = bop->getParent()->getParent()->getParent();
@@ -1191,14 +1235,16 @@ static bool lVectorIsLinear(llvm::Value *v, int vectorLength, int stride, std::v
 static bool lVectorIsLinearConstantInts(llvm::ConstantDataVector *cv, int vectorLength, int stride) {
     // Flatten the vector out into the elements array
     llvm::SmallVector<llvm::Constant *, ISPC_MAX_NVEC> elements;
-    for (int i = 0; i < (int)cv->getNumElements(); ++i)
+    for (int i = 0; i < (int)cv->getNumElements(); ++i) {
         elements.push_back(cv->getElementAsConstant(i));
+    }
     Assert((int)elements.size() == vectorLength);
 
     llvm::ConstantInt *ci = llvm::dyn_cast<llvm::ConstantInt>(elements[0]);
-    if (ci == NULL)
+    if (ci == nullptr) {
         // Not a vector of integers
         return false;
+    }
 
     int64_t prevVal = ci->getSExtValue();
 
@@ -1207,12 +1253,14 @@ static bool lVectorIsLinearConstantInts(llvm::ConstantDataVector *cv, int vector
     // is stride.  If not, fail.
     for (int i = 1; i < vectorLength; ++i) {
         ci = llvm::dyn_cast<llvm::ConstantInt>(elements[i]);
-        if (ci == NULL)
+        if (ci == nullptr) {
             return false;
+        }
 
         int64_t nextVal = ci->getSExtValue();
-        if (prevVal + stride != nextVal)
+        if (prevVal + stride != nextVal) {
             return false;
+        }
 
         prevVal = nextVal;
     }
@@ -1227,23 +1275,27 @@ static bool lCheckMulForLinear(llvm::Value *op0, llvm::Value *op1, int vectorLen
     // Is the first operand a constant integer value splatted across all of
     // the lanes?
     llvm::ConstantDataVector *cv = llvm::dyn_cast<llvm::ConstantDataVector>(op0);
-    if (cv == NULL)
+    if (cv == nullptr) {
         return false;
+    }
 
     llvm::Constant *csplat = cv->getSplatValue();
-    if (csplat == NULL)
+    if (csplat == nullptr) {
         return false;
+    }
 
     llvm::ConstantInt *splat = llvm::dyn_cast<llvm::ConstantInt>(csplat);
-    if (splat == NULL)
+    if (splat == nullptr) {
         return false;
+    }
 
     // If the splat value doesn't evenly divide the stride we're looking
     // for, there's no way that we can get the linear sequence we're
     // looking or.
     int64_t splatVal = splat->getSExtValue();
-    if (splatVal == 0 || splatVal > stride || (stride % splatVal) != 0)
+    if (splatVal == 0 || splatVal > stride || (stride % splatVal) != 0) {
         return false;
+    }
 
     // Check to see if the other operand is a linear vector with stride
     // given by stride/splatVal.
@@ -1258,23 +1310,27 @@ static bool lCheckShlForLinear(llvm::Value *op0, llvm::Value *op1, int vectorLen
     // Is the second operand a constant integer value splatted across all of
     // the lanes?
     llvm::ConstantDataVector *cv = llvm::dyn_cast<llvm::ConstantDataVector>(op1);
-    if (cv == NULL)
+    if (cv == nullptr) {
         return false;
+    }
 
     llvm::Constant *csplat = cv->getSplatValue();
-    if (csplat == NULL)
+    if (csplat == nullptr) {
         return false;
+    }
 
     llvm::ConstantInt *splat = llvm::dyn_cast<llvm::ConstantInt>(csplat);
-    if (splat == NULL)
+    if (splat == nullptr) {
         return false;
+    }
 
     // If (1 << the splat value) doesn't evenly divide the stride we're
     // looking for, there's no way that we can get the linear sequence
     // we're looking or.
     int64_t equivalentMul = (1LL << splat->getSExtValue());
-    if (equivalentMul > stride || (stride % equivalentMul) != 0)
+    if (equivalentMul > stride || (stride % equivalentMul) != 0) {
         return false;
+    }
 
     // Check to see if the first operand is a linear vector with stride
     // given by stride/splatVal.
@@ -1290,27 +1346,32 @@ static bool lCheckAndForLinear(llvm::Value *op0, llvm::Value *op1, int vectorLen
                                std::vector<llvm::PHINode *> &seenPhis) {
     // Require op1 to be a compile-time constant
     int64_t maskValue[ISPC_MAX_NVEC];
-    int nElts;
-    if (LLVMExtractVectorInts(op1, maskValue, &nElts) == false)
+    int nElts = 0;
+    if (LLVMExtractVectorInts(op1, maskValue, &nElts) == false) {
         return false;
+    }
     Assert(nElts == vectorLength);
 
     // Is op1 a smear of the same value across all lanes?  Give up if not.
-    for (int i = 1; i < vectorLength; ++i)
-        if (maskValue[i] != maskValue[0])
+    for (int i = 1; i < vectorLength; ++i) {
+        if (maskValue[i] != maskValue[0]) {
             return false;
+        }
+    }
 
     // If the op1 value isn't power of 2 minus one, then also give up.
     int64_t maskPlusOne = maskValue[0] + 1;
     bool isPowTwo = (maskPlusOne & (maskPlusOne - 1)) == 0;
-    if (isPowTwo == false)
+    if (isPowTwo == false) {
         return false;
+    }
 
     // The case we'll covert here is op0 being a linear vector with desired
     // stride, and where all of the values of op0, when divided by
     // maskPlusOne, have the same value.
-    if (lVectorIsLinear(op0, vectorLength, stride, seenPhis) == false)
+    if (lVectorIsLinear(op0, vectorLength, stride, seenPhis) == false) {
         return false;
+    }
 
     bool canAdd = true;
     bool isMult = lAllDivBaseEqual(op0, maskPlusOne, vectorLength, seenPhis, canAdd);
@@ -1321,11 +1382,12 @@ static bool lVectorIsLinear(llvm::Value *v, int vectorLength, int stride, std::v
     // First try the easy case: if the values are all just constant
     // integers and have the expected stride between them, then we're done.
     llvm::ConstantDataVector *cv = llvm::dyn_cast<llvm::ConstantDataVector>(v);
-    if (cv != NULL)
+    if (cv != nullptr) {
         return lVectorIsLinearConstantInts(cv, vectorLength, stride);
+    }
 
     llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(v);
-    if (bop != NULL) {
+    if (bop != nullptr) {
         // FIXME: is it right to pass the seenPhis to the all equal check as well??
         llvm::Value *op0 = bop->getOperand(0), *op1 = bop->getOperand(1);
         if ((bop->getOpcode() == llvm::Instruction::Add) || IsOrEquivalentToAdd(bop)) {
@@ -1335,23 +1397,25 @@ static bool lVectorIsLinear(llvm::Value *v, int vectorLength, int stride, std::v
             // unif + programIndex -> ascending linear sequence
             bool l0 = lVectorIsLinear(op0, vectorLength, stride, seenPhis);
             bool e1 = lVectorValuesAllEqual(op1, vectorLength, seenPhis);
-            if (l0 && e1)
+            if (l0 && e1) {
                 return true;
+            }
 
             bool e0 = lVectorValuesAllEqual(op0, vectorLength, seenPhis);
             bool l1 = lVectorIsLinear(op1, vectorLength, stride, seenPhis);
             return (e0 && l1);
-        } else if (bop->getOpcode() == llvm::Instruction::Sub)
+        } else if (bop->getOpcode() == llvm::Instruction::Sub) {
             // For subtraction, we only match:
             // programIndex - unif -> ascending linear seqeuence
             return (lVectorIsLinear(bop->getOperand(0), vectorLength, stride, seenPhis) &&
                     lVectorValuesAllEqual(bop->getOperand(1), vectorLength, seenPhis));
-        else if (bop->getOpcode() == llvm::Instruction::Mul) {
+        } else if (bop->getOpcode() == llvm::Instruction::Mul) {
             // Multiplies are a bit trickier, so are handled in a separate
             // function.
             bool m0 = lCheckMulForLinear(op0, op1, vectorLength, stride, seenPhis);
-            if (m0)
+            if (m0) {
                 return true;
+            }
             bool m1 = lCheckMulForLinear(op1, op0, vectorLength, stride, seenPhis);
             return m1;
         } else if (bop->getOpcode() == llvm::Instruction::Shl) {
@@ -1364,22 +1428,27 @@ static bool lVectorIsLinear(llvm::Value *v, int vectorLength, int stride, std::v
             // looping over SOA data
             bool linear = lCheckAndForLinear(op0, op1, vectorLength, stride, seenPhis);
             return linear;
-        } else
+        } else {
             return false;
+        }
     }
 
     llvm::CastInst *ci = llvm::dyn_cast<llvm::CastInst>(v);
-    if (ci != NULL)
+    if (ci != nullptr) {
         return lVectorIsLinear(ci->getOperand(0), vectorLength, stride, seenPhis);
+    }
 
-    if (llvm::isa<llvm::CallInst>(v) || llvm::isa<llvm::LoadInst>(v))
+    if (llvm::isa<llvm::CallInst>(v) || llvm::isa<llvm::LoadInst>(v)) {
         return false;
+    }
 
     llvm::PHINode *phi = llvm::dyn_cast<llvm::PHINode>(v);
-    if (phi != NULL) {
-        for (unsigned int i = 0; i < seenPhis.size(); ++i)
-            if (seenPhis[i] == phi)
+    if (phi != nullptr) {
+        for (unsigned int i = 0; i < seenPhis.size(); ++i) {
+            if (seenPhis[i] == phi) {
                 return true;
+            }
+        }
 
         seenPhis.push_back(phi);
 
@@ -1398,27 +1467,17 @@ static bool lVectorIsLinear(llvm::Value *v, int vectorLength, int stride, std::v
     }
 
     // TODO: is any reason to worry about these?
-    if (llvm::isa<llvm::InsertElementInst>(v))
+    if (llvm::isa<llvm::InsertElementInst>(v)) {
         return false;
+    }
 
     // TODO: we could also handle shuffles, but we haven't yet seen any
     // cases where doing so would detect cases where actually have a linear
     // vector.
     llvm::ShuffleVectorInst *shuffle = llvm::dyn_cast<llvm::ShuffleVectorInst>(v);
-    if (shuffle != NULL)
+    if (shuffle != nullptr) {
         return false;
-
-#if 0
-    fprintf(stderr, "linear check: ");
-    v->dump();
-    fprintf(stderr, "\n");
-    llvm::Instruction *inst = llvm::dyn_cast<llvm::Instruction>(v);
-    if (inst) {
-        inst->getParent()->dump();
-        fprintf(stderr, "\n");
-        fprintf(stderr, "\n");
     }
-#endif
 
     return false;
 }
@@ -1429,43 +1488,41 @@ static bool lVectorIsLinear(llvm::Value *v, int vectorLength, int stride, std::v
     elements equal to some non-constant value plus an integer offset, etc.
 */
 bool LLVMVectorIsLinear(llvm::Value *v, int stride) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vt = llvm::dyn_cast<llvm::FixedVectorType>(v->getType());
-#else
-    llvm::VectorType *vt = llvm::dyn_cast<llvm::VectorType>(v->getType());
-#endif
-    Assert(vt != NULL);
+    Assert(vt != nullptr);
     int vectorLength = vt->getNumElements();
 
     std::vector<llvm::PHINode *> seenPhis;
     bool linear = lVectorIsLinear(v, vectorLength, stride, seenPhis);
     Debug(SourcePos(), "LLVMVectorIsLinear(%s) -> %s.", v->getName().str().c_str(), linear ? "true" : "false");
-#ifndef ISPC_NO_DUMPS
-    if (g->debugPrint)
+    if (g->debugPrint) {
         LLVMDumpValue(v);
-#endif
+    }
 
     return linear;
 }
 
-#ifndef ISPC_NO_DUMPS
 static void lDumpValue(llvm::Value *v, std::set<llvm::Value *> &done) {
-    if (done.find(v) != done.end())
+    if (done.find(v) != done.end()) {
         return;
+    }
 
     llvm::Instruction *inst = llvm::dyn_cast<llvm::Instruction>(v);
-    if (done.size() > 0 && inst == NULL)
+    if (done.size() > 0 && inst == nullptr) {
         return;
+    }
 
     fprintf(stderr, "  ");
-    v->dump();
+    v->print(llvm::errs());
     done.insert(v);
 
-    if (inst == NULL)
+    if (inst == nullptr) {
         return;
+    }
 
-    for (unsigned i = 0; i < inst->getNumOperands(); ++i)
+    for (unsigned i = 0; i < inst->getNumOperands(); ++i) {
         lDumpValue(inst->getOperand(i), done);
+    }
 }
 
 void LLVMDumpValue(llvm::Value *v) {
@@ -1473,15 +1530,10 @@ void LLVMDumpValue(llvm::Value *v) {
     lDumpValue(v, done);
     fprintf(stderr, "----\n");
 }
-#endif
 
 static llvm::Value *lExtractFirstVectorElement(llvm::Value *v, std::map<llvm::PHINode *, llvm::PHINode *> &phiMap) {
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vt = llvm::dyn_cast<llvm::FixedVectorType>(v->getType());
-#else
-    llvm::VectorType *vt = llvm::dyn_cast<llvm::VectorType>(v->getType());
-#endif
-    Assert(vt != NULL);
+    Assert(vt != nullptr);
 
     // First, handle various constant types; do the extraction manually, as
     // appropriate.
@@ -1491,8 +1543,20 @@ static llvm::Value *lExtractFirstVectorElement(llvm::Value *v, std::map<llvm::PH
     if (llvm::ConstantVector *cv = llvm::dyn_cast<llvm::ConstantVector>(v)) {
         return cv->getOperand(0);
     }
-    if (llvm::ConstantDataVector *cdv = llvm::dyn_cast<llvm::ConstantDataVector>(v))
+    if (llvm::ConstantDataVector *cdv = llvm::dyn_cast<llvm::ConstantDataVector>(v)) {
         return cdv->getElementAsConstant(0);
+    }
+
+    // Function argument value is neither constant nor instruction result, so generate
+    // extractelement %value, 0 in the start of function.
+    if (llvm::Argument *arg = llvm::dyn_cast<llvm::Argument>(v)) {
+        llvm::Function *func = arg->getParent();
+        Assert(func != nullptr);
+        llvm::BasicBlock &bb = func->getEntryBlock();
+        llvm::BasicBlock::iterator insertPoint = bb.getFirstInsertionPt();
+        return llvm::ExtractElementInst::Create(v, LLVMInt32(0), "first_elt",
+                                                ISPC_INSERTION_POINT_ITERATOR(insertPoint));
+    }
 
     // Otherwise, all that we should have at this point is an instruction
     // of some sort
@@ -1504,29 +1568,40 @@ static llvm::Value *lExtractFirstVectorElement(llvm::Value *v, std::map<llvm::PH
     // Rewrite regular binary operators and casts to the scalarized
     // equivalent.
     llvm::BinaryOperator *bop = llvm::dyn_cast<llvm::BinaryOperator>(v);
-    if (bop != NULL) {
+    if (bop != nullptr) {
         llvm::Value *v0 = lExtractFirstVectorElement(bop->getOperand(0), phiMap);
         llvm::Value *v1 = lExtractFirstVectorElement(bop->getOperand(1), phiMap);
-        Assert(v0 != NULL);
-        Assert(v1 != NULL);
+        Assert(v0 != nullptr);
+        Assert(v1 != nullptr);
         // Note that the new binary operator is inserted immediately before
         // the previous vector one
-        return llvm::BinaryOperator::Create(bop->getOpcode(), v0, v1, newName, bop);
+        // Overcaution measures: copy flags from the original instruction only
+        // if --wrap-signed-int is disabled (this is the source of the nsw
+        // flags we want to transfer to the new instruction)
+        if (!g->wrapSignedInt) {
+            return llvm::BinaryOperator::CreateWithCopiedFlags(bop->getOpcode(), v0, v1, bop, newName,
+                                                               ISPC_INSERTION_POINT_INSTRUCTION(bop));
+        } else {
+            return llvm::BinaryOperator::Create(bop->getOpcode(), v0, v1, newName,
+                                                ISPC_INSERTION_POINT_INSTRUCTION(bop));
+        }
     }
 
     llvm::CastInst *cast = llvm::dyn_cast<llvm::CastInst>(v);
-    if (cast != NULL) {
+    if (cast != nullptr) {
         llvm::Value *v = lExtractFirstVectorElement(cast->getOperand(0), phiMap);
         // Similarly, the equivalent scalar cast instruction goes right
         // before the vector cast
-        return llvm::CastInst::Create(cast->getOpcode(), v, vt->getElementType(), newName, cast);
+        return llvm::CastInst::Create(cast->getOpcode(), v, vt->getElementType(), newName,
+                                      ISPC_INSERTION_POINT_INSTRUCTION(cast));
     }
 
     llvm::PHINode *phi = llvm::dyn_cast<llvm::PHINode>(v);
-    if (phi != NULL) {
+    if (phi != nullptr) {
         // For PHI notes, recursively scalarize them.
-        if (phiMap.find(phi) != phiMap.end())
+        if (phiMap.find(phi) != phiMap.end()) {
             return phiMap[phi];
+        }
 
         // We need to create the new scalar PHI node immediately, though,
         // and put it in the map<>, so that if we come back to this node
@@ -1536,9 +1611,9 @@ static llvm::Value *lExtractFirstVectorElement(llvm::Value *v, std::map<llvm::PH
         // The insertion point for the new phi node also has to be the
         // start of the bblock of the original phi node.
 
-        llvm::Instruction *phiInsertPos = &*(phi->getParent()->begin());
-        llvm::PHINode *scalarPhi =
-            llvm::PHINode::Create(vt->getElementType(), phi->getNumIncomingValues(), newName, phiInsertPos);
+        llvm::BasicBlock::iterator phiInsertPos = phi->getParent()->begin();
+        llvm::PHINode *scalarPhi = llvm::PHINode::Create(vt->getElementType(), phi->getNumIncomingValues(), newName,
+                                                         ISPC_INSERTION_POINT_ITERATOR(phiInsertPos));
         phiMap[phi] = scalarPhi;
 
         for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
@@ -1556,11 +1631,8 @@ static llvm::Value *lExtractFirstVectorElement(llvm::Value *v, std::map<llvm::PH
     // "lExtractFirstVectorElement" function.
     if (llvm::isa<llvm::ShuffleVectorInst>(v)) {
         llvm::ShuffleVectorInst *shuf = llvm::dyn_cast<llvm::ShuffleVectorInst>(v);
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
+        Assert(shuf);
         llvm::Value *indices = shuf->getShuffleMaskForBitcode();
-#else
-        llvm::Value *indices = shuf->getOperand(2);
-#endif
         if (llvm::isa<llvm::ConstantAggregateZero>(indices)) {
             return lExtractFirstVectorElement(shuf->getOperand(0), phiMap);
         }
@@ -1576,8 +1648,8 @@ static llvm::Value *lExtractFirstVectorElement(llvm::Value *v, std::map<llvm::PH
     // instruction, which we insert immediately after the instruction we
     // have here.
     llvm::Instruction *insertAfter = llvm::dyn_cast<llvm::Instruction>(v);
-    Assert(insertAfter != NULL);
-    llvm::Instruction *ee = llvm::ExtractElementInst::Create(v, LLVMInt32(0), "first_elt", (llvm::Instruction *)NULL);
+    Assert(insertAfter != nullptr);
+    llvm::Instruction *ee = llvm::ExtractElementInst::Create(v, LLVMInt32(0), "first_elt");
     ee->insertAfter(insertAfter);
     return ee;
 }
@@ -1595,18 +1667,15 @@ llvm::Value *LLVMExtractFirstVectorElement(llvm::Value *v) {
  */
 llvm::Value *LLVMConcatVectors(llvm::Value *v1, llvm::Value *v2, llvm::Instruction *insertBefore) {
     Assert(v1->getType() == v2->getType());
-#if ISPC_LLVM_VERSION >= ISPC_LLVM_11_0
     llvm::FixedVectorType *vt = llvm::dyn_cast<llvm::FixedVectorType>(v1->getType());
-#else
-    llvm::VectorType *vt = llvm::dyn_cast<llvm::VectorType>(v1->getType());
-#endif
-    Assert(vt != NULL);
+    Assert(vt != nullptr);
 
     int32_t identity[ISPC_MAX_NVEC];
     int resultSize = 2 * vt->getNumElements();
     Assert(resultSize <= ISPC_MAX_NVEC);
-    for (int i = 0; i < resultSize; ++i)
+    for (int i = 0; i < resultSize; ++i) {
         identity[i] = i;
+    }
 
     return LLVMShuffleVectors(v1, v2, identity, resultSize, insertBefore);
 }
@@ -1619,30 +1688,33 @@ llvm::Value *LLVMShuffleVectors(llvm::Value *v1, llvm::Value *v2, int32_t shuf[]
                                 llvm::Instruction *insertBefore) {
     llvm::Constant *shufVec[ISPC_MAX_NVEC];
     for (int i = 0; i < shufSize; ++i) {
-        if (shuf[i] == -1)
+        if (shuf[i] == -1) {
             shufVec[i] = llvm::UndefValue::get(LLVMTypes::Int32Type);
-        else
+        } else {
             shufVec[i] = LLVMInt32(shuf[i]);
+        }
     }
 
     llvm::ArrayRef<llvm::Constant *> aref(&shufVec[0], &shufVec[shufSize]);
     llvm::Value *vec = llvm::ConstantVector::get(aref);
 
-    return new llvm::ShuffleVectorInst(v1, v2, vec, "shuffle", insertBefore);
+    return new llvm::ShuffleVectorInst(v1, v2, vec, "shuffle", ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
 /** Copy the metadata (if any) attached to the 'from' instruction in the IR
     to the 'to' instruction. */
 void LLVMCopyMetadata(llvm::Value *vto, const llvm::Instruction *from) {
     llvm::Instruction *to = llvm::dyn_cast<llvm::Instruction>(vto);
-    if (!to)
+    if (!to) {
         return;
+    }
 
     llvm::SmallVector<std::pair<unsigned int, llvm::MDNode *>, 8> metadata;
 
     from->getAllMetadata(metadata);
-    for (unsigned int i = 0; i < metadata.size(); ++i)
+    for (unsigned int i = 0; i < metadata.size(); ++i) {
         to->setMetadata(metadata[i].first, metadata[i].second);
+    }
 }
 
 /** Find the SourcePos that the metadata in the instruction (if present) corresponds to */
@@ -1653,8 +1725,9 @@ bool LLVMGetSourcePosFromMetadata(const llvm::Instruction *inst, SourcePos *pos)
     llvm::MDNode *last_line = inst->getMetadata("last_line");
     llvm::MDNode *last_column = inst->getMetadata("last_column");
 
-    if (!filename || !first_line || !first_column || !last_line || !last_column)
+    if (!filename || !first_line || !first_column || !last_line || !last_column) {
         return false;
+    }
 
     // All of these asserts are things that FunctionEmitContext::addGSMetadata() is
     // expected to have done in its operation
@@ -1687,58 +1760,61 @@ bool LLVMGetSourcePosFromMetadata(const llvm::Instruction *inst, SourcePos *pos)
     undefined value.  This only makes a weak attempt at chasing this down,
     only detecting flat-out undef values, and bitcasts of undef values. */
 bool LLVMIsValueUndef(llvm::Value *value) {
-    if (llvm::isa<llvm::UndefValue>(value))
+    if (llvm::isa<llvm::UndefValue>(value)) {
         return true;
+    }
 
     llvm::BitCastInst *bci = llvm::dyn_cast<llvm::BitCastInst>(value);
-    if (bci)
+    if (bci) {
         return LLVMIsValueUndef(bci->getOperand(0));
+    }
 
     return false;
 }
 
-llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, const llvm::Twine &name,
-                                llvm::Instruction *insertBefore) {
+llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, const llvm::Twine &name,
+                             llvm::Instruction *insertBefore) {
     llvm::Value *args[2] = {arg0, arg1};
     llvm::ArrayRef<llvm::Value *> newArgArray(&args[0], &args[2]);
-    return llvm::CallInst::Create(func, newArgArray, name, insertBefore);
+    return llvm::CallInst::Create(func, newArgArray, name, ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
-llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                const llvm::Twine &name, llvm::Instruction *insertBefore) {
+llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                             const llvm::Twine &name, llvm::Instruction *insertBefore) {
     llvm::Value *args[3] = {arg0, arg1, arg2};
     llvm::ArrayRef<llvm::Value *> newArgArray(&args[0], &args[3]);
-    return llvm::CallInst::Create(func, newArgArray, name, insertBefore);
+    return llvm::CallInst::Create(func, newArgArray, name, ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
-llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                llvm::Value *arg3, const llvm::Twine &name, llvm::Instruction *insertBefore) {
+llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                             llvm::Value *arg3, const llvm::Twine &name, llvm::Instruction *insertBefore) {
     llvm::Value *args[4] = {arg0, arg1, arg2, arg3};
     llvm::ArrayRef<llvm::Value *> newArgArray(&args[0], &args[4]);
-    return llvm::CallInst::Create(func, newArgArray, name, insertBefore);
+    return llvm::CallInst::Create(func, newArgArray, name, ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
-llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                llvm::Value *arg3, llvm::Value *arg4, const llvm::Twine &name,
-                                llvm::Instruction *insertBefore) {
+llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                             llvm::Value *arg3, llvm::Value *arg4, const llvm::Twine &name,
+                             llvm::Instruction *insertBefore) {
     llvm::Value *args[5] = {arg0, arg1, arg2, arg3, arg4};
     llvm::ArrayRef<llvm::Value *> newArgArray(&args[0], &args[5]);
-    return llvm::CallInst::Create(func, newArgArray, name, insertBefore);
+    return llvm::CallInst::Create(func, newArgArray, name, ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
-llvm::Instruction *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
-                                llvm::Value *arg3, llvm::Value *arg4, llvm::Value *arg5, const llvm::Twine &name,
-                                llvm::Instruction *insertBefore) {
+llvm::CallInst *LLVMCallInst(llvm::Function *func, llvm::Value *arg0, llvm::Value *arg1, llvm::Value *arg2,
+                             llvm::Value *arg3, llvm::Value *arg4, llvm::Value *arg5, const llvm::Twine &name,
+                             llvm::Instruction *insertBefore) {
     llvm::Value *args[6] = {arg0, arg1, arg2, arg3, arg4, arg5};
     llvm::ArrayRef<llvm::Value *> newArgArray(&args[0], &args[6]);
-    return llvm::CallInst::Create(func, newArgArray, name, insertBefore);
+    return llvm::CallInst::Create(func, newArgArray, name, ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
-llvm::Instruction *LLVMGEPInst(llvm::Value *ptr, llvm::Type *ptrElType, llvm::Value *offset, const char *name,
-                               llvm::Instruction *insertBefore) {
+llvm::GetElementPtrInst *LLVMGEPInst(llvm::Value *ptr, llvm::Type *ptrElType, llvm::Value *offset, const char *name,
+                                     llvm::Instruction *insertBefore) {
     llvm::Value *index[1] = {offset};
     llvm::ArrayRef<llvm::Value *> arrayRef(&index[0], &index[1]);
-    return llvm::GetElementPtrInst::Create(ptrElType, ptr, arrayRef, name, insertBefore);
+    return llvm::GetElementPtrInst::Create(ptrElType, ptr, arrayRef, name,
+                                           ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
 /** Given a vector of constant values (int, float, or bool) representing an
@@ -1764,22 +1840,24 @@ static uint64_t lConstElementsToMask(const llvm::SmallVector<llvm::Constant *, I
             // We create a separate 'undef mask' with all undef bits set.
             // This mask will have no bits set if there are no 'undef' elements.
             llvm::UndefValue *uv = llvm::dyn_cast<llvm::UndefValue>(elements[i]);
-            Assert(uv != NULL); // vs return -1 if NULL?
+            Assert(uv != nullptr); // vs return -1 if nullptr?
             undefSetMask |= (1ull << i);
             continue;
         }
         // Is the high-bit set?  If so, OR in the appropriate bit in
         // the result mask
-        if (intMaskValue.countLeadingOnes() > 0)
+        if (intMaskValue.countLeadingOnes() > 0) {
             mask |= (1ull << i);
+        }
     }
 
     // if no bits are set in mask, do not need to consider undefs. It's
     // always 'all_off'.
     // If any bits are set in mask, assume' undef' bits as as '1'. This ensures
     // cases with only '1's and 'undef's will be considered as 'all_on'
-    if (mask != 0)
+    if (mask != 0) {
         mask |= undefSetMask;
+    }
 
     return mask;
 }
@@ -1792,23 +1870,26 @@ static uint64_t lConstElementsToMask(const llvm::SmallVector<llvm::Constant *, I
  */
 bool GetMaskFromValue(llvm::Value *factor, uint64_t *mask) {
     llvm::ConstantDataVector *cdv = llvm::dyn_cast<llvm::ConstantDataVector>(factor);
-    if (cdv != NULL) {
+    if (cdv != nullptr) {
         llvm::SmallVector<llvm::Constant *, ISPC_MAX_NVEC> elements;
-        for (int i = 0; i < (int)cdv->getNumElements(); ++i)
+        for (int i = 0; i < (int)cdv->getNumElements(); ++i) {
             elements.push_back(cdv->getElementAsConstant(i));
+        }
         *mask = lConstElementsToMask(elements);
         return true;
     }
 
     llvm::ConstantVector *cv = llvm::dyn_cast<llvm::ConstantVector>(factor);
-    if (cv != NULL) {
+    if (cv != nullptr) {
         llvm::SmallVector<llvm::Constant *, ISPC_MAX_NVEC> elements;
         for (int i = 0; i < (int)cv->getNumOperands(); ++i) {
             llvm::Constant *c = llvm::dyn_cast<llvm::Constant>(cv->getOperand(i));
-            if (c == NULL)
+            if (c == nullptr) {
                 return false;
-            if (llvm::isa<llvm::ConstantExpr>(cv->getOperand(i)))
+            }
+            if (llvm::isa<llvm::ConstantExpr>(cv->getOperand(i))) {
                 return false; // We can not handle constant expressions here
+            }
             elements.push_back(c);
         }
         *mask = lConstElementsToMask(elements);
@@ -1817,18 +1898,6 @@ bool GetMaskFromValue(llvm::Value *factor, uint64_t *mask) {
         *mask = 0;
         return true;
     } else {
-#if 0
-        llvm::ConstantExpr *ce = llvm::dyn_cast<llvm::ConstantExpr>(factor);
-        if (ce != NULL) {
-            llvm::TargetMachine *targetMachine = g->target->GetTargetMachine();
-            const llvm::TargetData *td = targetMachine->getTargetData();
-            llvm::Constant *c = llvm::ConstantFoldConstantExpression(ce, td);
-            c->dump();
-            factor = c;
-        }
-        // else we should be able to handle it above...
-        Assert(!llvm::isa<llvm::Constant>(factor));
-#endif
         return false;
     }
 }
@@ -1837,22 +1906,34 @@ bool GetMaskFromValue(llvm::Value *factor, uint64_t *mask) {
     unknown at compile time.
 */
 MaskStatus GetMaskStatusFromValue(llvm::Value *mask, int vecWidth) {
-    uint64_t bits;
-    if (GetMaskFromValue(mask, &bits) == false)
+    uint64_t bits = 0;
+    if (GetMaskFromValue(mask, &bits) == false) {
         return MaskStatus::unknown;
+    }
 
-    if (bits == 0)
+    if (bits == 0) {
         return MaskStatus::all_off;
+    }
 
-    if (vecWidth == -1)
+    if (vecWidth == -1) {
         vecWidth = g->target->getVectorWidth();
+    }
     Assert(vecWidth <= 64);
 
     for (int i = 0; i < vecWidth; ++i) {
-        if ((bits & (1ull << i)) == 0)
+        if ((bits & (1ull << i)) == 0) {
             return MaskStatus::mixed;
+        }
     }
     return MaskStatus::all_on;
+}
+
+void AddUWTableFuncAttr(llvm::Function *fn) {
+    if (g->target_os == TargetOS::windows) {
+        // Enable generation an unwind table during codegen.
+        // It is needed to generate backtraces during debugging and to unwind callstack.
+        fn->setUWTableKind(llvm::UWTableKind::Default);
+    }
 }
 
 #ifdef ISPC_XE_ENABLED
@@ -1883,7 +1964,7 @@ static void lGetAddressSpace(llvm::Value *v, std::set<llvm::Value *> &done, std:
 
     llvm::Instruction *inst = llvm::dyn_cast<llvm::Instruction>(v);
     bool isConstExpr = false;
-    if (inst == NULL) {
+    if (inst == nullptr) {
         // Case when GEP is constant expression
         if (llvm::ConstantExpr *constExpr = llvm::dyn_cast<llvm::ConstantExpr>(v)) {
             // This instruction isn't inserted anywhere, so delete it when done
@@ -1892,7 +1973,7 @@ static void lGetAddressSpace(llvm::Value *v, std::set<llvm::Value *> &done, std:
         }
     }
 
-    if (done.size() > 0 && inst == NULL) {
+    if (done.size() > 0 && inst == nullptr) {
         // Found external pointer like "float* %aFOO"
         if (llvm::isa<llvm::PointerType>(v->getType()))
             addrSpaceVec.insert(AddressSpace::ispc_global);
@@ -1907,7 +1988,7 @@ static void lGetAddressSpace(llvm::Value *v, std::set<llvm::Value *> &done, std:
         return;
     }
 
-    if (inst == NULL || llvm::isa<llvm::CallInst>(v)) {
+    if (inst == nullptr || llvm::isa<llvm::CallInst>(v)) {
         if (llvm::isa<llvm::PointerType>(v->getType()) || (inst && lIsSVMLoad(inst)))
             addrSpaceVec.insert(AddressSpace::ispc_global);
         return;
@@ -1925,6 +2006,7 @@ static void lGetAddressSpace(llvm::Value *v, std::set<llvm::Value *> &done, std:
         // This is the only return point that constant expression instruction
         // can reach, drop all references here
         inst->dropAllReferences();
+        inst->deleteValue();
     }
 }
 
@@ -1944,5 +2026,34 @@ AddressSpace GetAddressSpace(llvm::Value *v) {
     }
     return AddressSpace::ispc_default;
 }
+
+/** Fix function attribute by removing input function attr and adding memory effect instead.
+    https://reviews.llvm.org/D135780
+*/
+void FixFunctionAttribute(llvm::Function &Fn, llvm::Attribute::AttrKind attr, llvm::MemoryEffects memEf) {
+    if (Fn.getFnAttribute(attr).isValid()) {
+        for (auto &U : Fn.uses()) {
+            if (auto *Call = llvm::dyn_cast<llvm::CallInst>(&*U)) {
+                Call->setMemoryEffects(memEf);
+            }
+        }
+        // Fix function declaration
+        Fn.removeFnAttr(attr);
+        switch (attr) {
+        case llvm::Attribute::ReadNone:
+            Fn.setDoesNotAccessMemory();
+            break;
+        case llvm::Attribute::ReadOnly:
+            Fn.setOnlyReadsMemory();
+            break;
+        case llvm::Attribute::WriteOnly:
+            Fn.setOnlyWritesMemory();
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 #endif
 } // namespace ispc

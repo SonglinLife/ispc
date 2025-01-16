@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2021, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2025, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file util.cpp
@@ -64,8 +37,29 @@
 #endif // ISPC_HOST_IS_WINDOWS
 #include <algorithm>
 #include <set>
+#include <sstream>
 
 #include <llvm/IR/DataLayout.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
+
+#ifdef _LIBCPP_VERSION
+// Provide own definition of std::__libcpp_verbose_abort to avoid missing symbols error on macOS with old
+// system libc++.1.dylib. The symbol is there for macOS 13 Ventura and later, but not macOS 12 and earlier.
+// See #3071 for more details.
+void std::__libcpp_verbose_abort(char const *format, ...)
+#if ISPC_LLVM_VERSION >= ISPC_LLVM_20_0
+    noexcept
+#endif
+{
+    va_list list;
+    va_start(list, format);
+    vfprintf(stderr, format, list);
+    va_end(list);
+
+    abort();
+}
+#endif // _LIBCPP_VERSION
 
 using namespace ispc;
 
@@ -76,26 +70,28 @@ using namespace ispc;
     default.
  */
 int ispc::TerminalWidth() {
-    if (g->disableLineWrap)
+    if (g->disableLineWrap) {
         return 1 << 30;
+    }
 
 #if defined(ISPC_HOST_IS_WINDOWS)
     HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (h == INVALID_HANDLE_VALUE || h == NULL)
+    if (h == INVALID_HANDLE_VALUE || h == nullptr)
         return 80;
     CONSOLE_SCREEN_BUFFER_INFO bufferInfo = {{0}};
     GetConsoleScreenBufferInfo(h, &bufferInfo);
     return bufferInfo.dwSize.X;
 #else
     struct winsize w;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) < 0)
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) < 0) {
         return 80;
+    }
     return w.ws_col;
 #endif // ISPC_HOST_IS_WINDOWS
 }
 
 static bool lHaveANSIColors() {
-    static bool r = (getenv("TERM") != NULL && strcmp(getenv("TERM"), "dumb") != 0);
+    static bool r = (getenv("TERM") != nullptr && strcmp(getenv("TERM"), "dumb") != 0);
 #ifndef ISPC_HOST_IS_WINDOWS
     r &= (bool)isatty(2);
     r |= g->forceColoredOutput;
@@ -104,39 +100,44 @@ static bool lHaveANSIColors() {
 }
 
 static const char *lStartBold() {
-    if (lHaveANSIColors())
+    if (lHaveANSIColors()) {
         return "\033[1m";
-    else
+    } else {
         return "";
+    }
 }
 
 static const char *lStartRed() {
-    if (lHaveANSIColors())
+    if (lHaveANSIColors()) {
         return "\033[31m";
-    else
+    } else {
         return "";
+    }
 }
 
 static const char *lStartBlue() {
-    if (lHaveANSIColors())
+    if (lHaveANSIColors()) {
         return "\033[34m";
-    else
+    } else {
         return "";
+    }
 }
 
 static const char *lResetColor() {
-    if (lHaveANSIColors())
+    if (lHaveANSIColors()) {
         return "\033[0m";
-    else
+    } else {
         return "";
+    }
 }
 
 /** Given a pointer into a string, find the end of the current word and
     return a pointer to its last character.
 */
 static const char *lFindWordEnd(const char *buf) {
-    while (*buf != '\0' && !isspace(*buf))
+    while (*buf != '\0' && !isspace(*buf)) {
         ++buf;
+    }
     return buf;
 }
 
@@ -146,36 +147,43 @@ static const char *lFindWordEnd(const char *buf) {
     SourcePos with '^' symbols.
 */
 static void lPrintFileLineContext(SourcePos p) {
-    if (p.first_line == 0)
+    if (p.first_line == 0) {
         return;
+    }
 
     FILE *f = fopen(p.name, "r");
-    if (!f)
+    if (!f) {
         return;
+    }
 
-    int c, curLine = 1;
+    int c = 0, curLine = 1;
     while ((c = fgetc(f)) != EOF) {
         // Don't print more than three lines of context.  (More than that,
         // and we're probably doing the wrong thing...)
         if (curLine >= std::max(p.first_line, p.last_line - 2) && curLine <= p.last_line) {
-            if (c == '\t')
+            if (c == '\t') {
                 c = ' ';
+            }
 
             fputc(c, stderr);
         }
-        if (c == '\n')
+        if (c == '\n') {
             ++curLine;
-        if (curLine > p.last_line)
+        }
+        if (curLine > p.last_line) {
             break;
+        }
     }
 
     int i = 1;
-    for (; i < p.first_column; ++i)
+    for (; i < p.first_column; ++i) {
         fputc(' ', stderr);
+    }
     fputc('^', stderr);
     ++i;
-    for (; i < p.last_column; ++i)
+    for (; i < p.last_column; ++i) {
         fputc('^', stderr);
+    }
     fputc('\n', stderr);
     fputc('\n', stderr);
 
@@ -190,14 +198,17 @@ static int lFindIndent(int numColons, const char *buf) {
     int indent = 0;
     while (*buf != '\0') {
         if (*buf == '\033') {
-            while (*buf != '\0' && *buf != 'm')
+            while (*buf != '\0' && *buf != 'm') {
                 ++buf;
-            if (*buf == 'm')
+            }
+            if (*buf == 'm') {
                 ++buf;
+            }
         } else {
             if (*buf == ':') {
-                if (--numColons == 0)
+                if (--numColons == 0) {
                     break;
+                }
             }
             ++indent;
             ++buf;
@@ -235,8 +246,9 @@ void ispc::PrintWithWordBreaks(const char *buf, int indent, int columnWidth, FIL
             // Handle newlines cleanly
             column = indent;
             outStr.push_back('\n');
-            for (int i = 0; i < indent; ++i)
+            for (int i = 0; i < indent; ++i) {
                 outStr.push_back(' ');
+            }
             // Respect spaces after newlines
             ++msgPos;
             while (*msgPos == ' ') {
@@ -246,10 +258,12 @@ void ispc::PrintWithWordBreaks(const char *buf, int indent, int columnWidth, FIL
             continue;
         }
 
-        while (*msgPos != '\0' && isspace(*msgPos))
+        while (*msgPos != '\0' && isspace(*msgPos)) {
             ++msgPos;
-        if (*msgPos == '\0')
+        }
+        if (*msgPos == '\0') {
             break;
+        }
 
         const char *wordEnd = lFindWordEnd(msgPos);
         if (column > indent && column + wordEnd - msgPos > width) {
@@ -258,8 +272,9 @@ void ispc::PrintWithWordBreaks(const char *buf, int indent, int columnWidth, FIL
             outStr.push_back('\n');
             // Indent to the same column as the ":" at the start of the
             // message.
-            for (int i = 0; i < indent; ++i)
+            for (int i = 0; i < indent; ++i) {
                 outStr.push_back(' ');
+            }
         }
 
         // Finally go and copy the word
@@ -278,8 +293,8 @@ void ispc::PrintWithWordBreaks(const char *buf, int indent, int columnWidth, FIL
 #ifdef ISPC_HOST_IS_WINDOWS
 // we cover for the lack vasprintf and asprintf on windows (also covers mingw)
 int vasprintf(char **sptr, const char *fmt, va_list argv) {
-    int wanted = vsnprintf(*sptr = NULL, 0, fmt, argv);
-    if ((wanted < 0) || ((*sptr = (char *)malloc(1 + wanted)) == NULL))
+    int wanted = vsnprintf(*sptr = nullptr, 0, fmt, argv);
+    if ((wanted < 0) || ((*sptr = (char *)malloc(1 + wanted)) == nullptr))
         return -1;
 
     return vsprintf(*sptr, fmt, argv);
@@ -304,7 +319,7 @@ int asprintf(char **sptr, const char *fmt, ...) {
     @param args   Arguments with values for format string % entries
 */
 static void lPrint(const char *type, bool isError, SourcePos p, const char *fmt, va_list args) {
-    char *errorBuf, *formattedBuf;
+    char *errorBuf = nullptr, *formattedBuf = nullptr;
     if (vasprintf(&errorBuf, fmt, args) == -1) {
         fprintf(stderr, "vasprintf() unable to allocate memory!\n");
         exit(1);
@@ -351,13 +366,15 @@ static void lPrint(const char *type, bool isError, SourcePos p, const char *fmt,
 }
 
 void ispc::Error(SourcePos p, const char *fmt, ...) {
-    if (m != NULL) {
+    if (m != nullptr) {
         ++m->errorCount;
-        if ((g->errorLimit != -1) && (g->errorLimit <= m->errorCount - 1))
+        if ((g->errorLimit != -1) && (g->errorLimit <= m->errorCount - 1)) {
             return;
+        }
     }
-    if (g->quiet)
+    if (g->quiet) {
         return;
+    }
 
     va_list args;
     va_start(args, fmt);
@@ -366,29 +383,31 @@ void ispc::Error(SourcePos p, const char *fmt, ...) {
 }
 
 void ispc::Debug(SourcePos p, const char *fmt, ...) {
-#ifndef ISPC_NO_DUMPS
-    if (!g->debugPrint || g->quiet)
+    if (!g->debugPrint || g->quiet) {
         return;
+    }
 
     va_list args;
     va_start(args, fmt);
     lPrint("Debug", false, p, fmt, args);
     va_end(args);
-#endif
 }
 
 void ispc::Warning(SourcePos p, const char *fmt, ...) {
 
     std::map<std::pair<int, std::string>, bool>::iterator turnOffWarnings_it =
         g->turnOffWarnings.find(std::pair<int, std::string>(p.last_line, std::string(p.name)));
-    if ((turnOffWarnings_it != g->turnOffWarnings.end()) && (turnOffWarnings_it->second == false))
+    if ((turnOffWarnings_it != g->turnOffWarnings.end()) && (turnOffWarnings_it->second == false)) {
         return;
+    }
 
-    if (g->warningsAsErrors && m != NULL)
+    if (g->warningsAsErrors && m != nullptr) {
         ++m->errorCount;
+    }
 
-    if (g->disableWarnings || g->quiet)
+    if (g->disableWarnings || g->quiet) {
         return;
+    }
 
     va_list args;
     va_start(args, fmt);
@@ -402,16 +421,19 @@ void ispc::PerformanceWarning(SourcePos p, const char *fmt, ...) {
     if (!g->emitPerfWarnings ||
         (sourcePosName.length() >= stdlibFile.length() &&
          sourcePosName.compare(sourcePosName.length() - stdlibFile.length(), stdlibFile.length(), stdlibFile) == 0) ||
-        g->quiet)
+        g->quiet) {
         return;
+    }
 
     std::map<std::pair<int, std::string>, bool>::iterator turnOffWarnings_it =
         g->turnOffWarnings.find(std::pair<int, std::string>(p.last_line, p.name));
-    if (turnOffWarnings_it != g->turnOffWarnings.end())
+    if (turnOffWarnings_it != g->turnOffWarnings.end()) {
         return;
+    }
 
-    if (g->warningsAsErrors && m != NULL)
+    if (g->warningsAsErrors && m != nullptr) {
         ++m->errorCount;
+    }
 
     va_list args;
     va_start(args, fmt);
@@ -421,8 +443,9 @@ void ispc::PerformanceWarning(SourcePos p, const char *fmt, ...) {
 
 static void lPrintBugText() {
     static bool printed = false;
-    if (printed)
+    if (printed) {
         return;
+    }
 
     printed = true;
     fprintf(stderr, "***\n"
@@ -458,8 +481,9 @@ int ispc::StringEditDistance(const std::string &str1, const std::string &str2, i
     // Small hack: don't return 0 if the strings are the same; if we've
     // gotten here, there's been a parsing error, and suggesting the same
     // string isn't going to actually help things.
-    if (str1 == str2)
+    if (str1 == str2) {
         return maxDist;
+    }
 
     int n1 = (int)str1.size(), n2 = (int)str2.size();
     int nmax = std::max(n1, n2);
@@ -467,8 +491,9 @@ int ispc::StringEditDistance(const std::string &str1, const std::string &str2, i
     int *current = (int *)alloca((nmax + 1) * sizeof(int));
     int *previous = (int *)alloca((nmax + 1) * sizeof(int));
 
-    for (int i = 0; i <= n2; ++i)
+    for (int i = 0; i <= n2; ++i) {
         previous[i] = i;
+    }
 
     for (int y = 1; y <= n1; ++y) {
         current[0] = y;
@@ -480,8 +505,9 @@ int ispc::StringEditDistance(const std::string &str1, const std::string &str2, i
             rowBest = std::min(rowBest, current[x]);
         }
 
-        if (maxDist != 0 && rowBest > maxDist)
+        if (maxDist != 0 && rowBest > maxDist) {
             return maxDist + 1;
+        }
 
         std::swap(current, previous);
     }
@@ -490,9 +516,10 @@ int ispc::StringEditDistance(const std::string &str1, const std::string &str2, i
 }
 
 std::vector<std::string> ispc::MatchStrings(const std::string &str, const std::vector<std::string> &options) {
-    if (str.size() == 0 || (str.size() == 1 && !isalpha(str[0])))
+    if (str.size() == 0 || (str.size() == 1 && !isalpha(str[0]))) {
         // don't even try...
         return std::vector<std::string>();
+    }
 
     const int maxDelta = 2;
     std::vector<std::string> matches[maxDelta + 1];
@@ -502,68 +529,48 @@ std::vector<std::string> ispc::MatchStrings(const std::string &str, const std::v
     // distance.
     for (int i = 0; i < (int)options.size(); ++i) {
         int dist = StringEditDistance(str, options[i], maxDelta + 1);
-        if (dist <= maxDelta)
+        if (dist <= maxDelta) {
             matches[dist].push_back(options[i]);
+        }
     }
 
     // And return the first one of them, if any, that has at least one
     // match.
     for (int i = 0; i <= maxDelta; ++i) {
-        if (matches[i].size())
+        if (matches[i].size()) {
             return matches[i];
+        }
     }
     return std::vector<std::string>();
 }
 
-void ispc::GetDirectoryAndFileName(const std::string &currentDirectory, const std::string &relativeName,
-                                   std::string *directory, std::string *filename) {
-#ifdef ISPC_HOST_IS_WINDOWS
-    char path[MAX_PATH];
-    const char *combPath = PathCombine(path, currentDirectory.c_str(), relativeName.c_str());
-    Assert(combPath != NULL);
-    const char *filenamePtr = PathFindFileName(combPath);
-    *filename = filenamePtr;
-    *directory = std::string(combPath, filenamePtr - combPath);
-#else
-    // We need a fully qualified path.  First, see if the current file name
-    // is fully qualified itself--in that case, the current working
-    // directory isn't needed.
-    // @todo This probably needs to be smarter for Windows...
-    std::string fullPath;
-    if (relativeName[0] == '/')
+std::pair<std::string, std::string> ispc::GetDirectoryAndFileName(const std::string &currentDirectory,
+                                                                  const std::string &relativeName) {
+    llvm::SmallString<256> fullPath;
+
+    if (llvm::sys::path::is_absolute(relativeName)) {
+        // We may actually get not relative path but absolute, then just use it.
         fullPath = relativeName;
-    else {
-        fullPath = g->currentDirectory;
-        if (fullPath[fullPath.size() - 1] != '/')
-            fullPath.push_back('/');
-        fullPath += relativeName;
+    } else {
+        fullPath = currentDirectory;
+        llvm::sys::path::append(fullPath, relativeName);
     }
 
-    // now, we need to separate it into the base name and the directory
-    const char *fp = fullPath.c_str();
-    const char *basenameStart = strrchr(fp, '/');
-    Assert(basenameStart != NULL);
-    ++basenameStart;
-    Assert(basenameStart[0] != '\0');
-    *filename = basenameStart;
-    *directory = std::string(fp, basenameStart - fp);
-#endif // ISPC_HOST_IS_WINDOWS
+    // Extract the directory and file name from the full path
+    std::string filename = llvm::sys::path::filename(fullPath).str();
+    std::string dirname = llvm::sys::path::parent_path(fullPath).str();
+
+    return std::make_pair(dirname, filename);
 }
 
 static std::set<std::string> lGetStringArray(const std::string &str) {
     std::set<std::string> result;
+    std::stringstream ss(str);
 
     Assert(str.find('-') != str.npos);
-
-    size_t pos_prev = 0, pos;
-    do {
-        pos = str.find('-', pos_prev);
-        std::string substr = str.substr(pos_prev, pos - pos_prev);
-        result.insert(substr);
-        pos_prev = pos;
-        pos_prev++;
-    } while (pos != str.npos);
-
+    for (std::string item; std::getline(ss, item, '-');) {
+        result.insert(item);
+    }
     return result;
 }
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2021-2024, Intel Corporation
+// SPDX-License-Identifier: BSD-3-Clause
+
 #include <benchmark/benchmark.h>
 #include <bitset>
 #include <cstdint>
@@ -19,7 +22,7 @@ WARM_UP_RUN();
 // Minimum size is maximum target width, i.e. 64.
 // Larger buffer is better, but preferably to stay within L1.
 #define ARGS Arg(8192)
-//#define ARGS RangeMultiplier(2)->Range(64, 64<<15)->Complexity(benchmark::oN)
+// #define ARGS RangeMultiplier(2)->Range(64, 64<<15)->Complexity(benchmark::oN)
 
 template <typename T> static void init_src(T *src, int count) {
     for (int i = 0; i < count; i++) {

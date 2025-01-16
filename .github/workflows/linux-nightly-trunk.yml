@@ -1,6 +1,11 @@
+# Copyright 2020-2025, Intel Corporation
+# SPDX-License-Identifier: BSD-3-Clause
+
 # Nightly Linux run.
 
 name: Nightly Linux tests / LLVM trunk
+
+permissions: read-all
 
 # Run daily - test sse2-avx512 targets @ -O0/-O1/-O2
 on:
@@ -11,20 +16,21 @@ on:
       - '**test_nightly**'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  SDE_MIRROR_ID: 684899
-  SDE_TAR_NAME: sde-external-9.0.0-2021-11-07
+  SDE_MIRROR_ID: 831748
+  SDE_TAR_NAME: sde-external-9.44.0-2024-08-22
+  USER_AGENT: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36"
 
 jobs:
-  # Building LLVM in docker, as using native Ubuntu 18.04 github-hosted image contains newer-than-expected libs and
-  # makes the resulting build not usable on other Ubuntu 18.04 images.
-  # Doing Linux build in two stages, as self-build is required, but Github Action runners are not always capable
-  # to finish the full job in less than 6 hours.
-  linux-build-llvm-trunk-1:
-    runs-on: ubuntu-latest
+  linux-build-llvm-trunk:
+    runs-on: ubuntu-22.04
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       with:
         submodules: true
 
@@ -34,70 +40,39 @@ jobs:
 
     - name: Build LLVM
       run: |
-        cd docker/ubuntu/18.04/cpu_ispc_build
-        docker buildx create --use
-        docker buildx build --tag ispc/ubuntu18.04:stage1 --target=llvm_build_step1 --cache-to=type=local,dest=cache.local --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=trunk .
-
-    - name: Upload package
-      uses: actions/upload-artifact@v3
-      with:
-        name: llvm_trunk_linux_stage1_cache
-        path: docker/ubuntu/18.04/cpu_ispc_build/cache.local
-
-  linux-build-llvm-trunk-2:
-    needs: [linux-build-llvm-trunk-1]
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        submodules: true
-
-    - name: Check environment
-      run: |
-        cat /proc/cpuinfo
-
-    - name: Download package
-      uses: actions/download-artifact@v3
-      with:
-        name: llvm_trunk_linux_stage1_cache
-        path: docker/ubuntu/18.04/cpu_ispc_build/cache.local
-
-    - name: Build LLVM
-      run: |
-        cd docker/ubuntu/18.04/cpu_ispc_build
+        cd docker/ubuntu/22.04/cpu_ispc_build
         ls -al
         docker buildx create --use
-        docker buildx build --tag ispc/ubuntu18.04:stage2 --target=llvm_build_step2 --cache-from=type=local,src=cache.local --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=trunk --output=type=tar,dest=result.tar .
+        docker buildx build --tag ispc/ubuntu22.04 --target=llvm_build --build-arg REPO="${GITHUB_REPOSITORY}" --build-arg SHA="${GITHUB_SHA}" --build-arg LLVM_VERSION=trunk --output=type=tar,dest=result.tar .
 
     - name: Pack LLVM
       run: |
-        cd docker/ubuntu/18.04/cpu_ispc_build
+        cd docker/ubuntu/22.04/cpu_ispc_build
         tar xvf result.tar usr/local/src/llvm
         mv usr/local/src/llvm/bin-trunk .
         # Note using gzip here, instead of xz - trading of space for speed, as it's just for passing to another stage.
-        tar czvf llvm-trunk-ubuntu18.04-Release+Asserts-x86.arm.wasm.tar.gz bin-trunk
+        tar czvf llvm-trunk-ubuntu22.04-Release+Asserts-x86.arm.wasm.tar.gz bin-trunk
 
     - name: Upload package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
       with:
         name: llvm_trunk_linux
-        path: docker/ubuntu/18.04/cpu_ispc_build/llvm-trunk-ubuntu18.04-Release+Asserts-x86.arm.wasm.tar.gz
+        path: docker/ubuntu/22.04/cpu_ispc_build/llvm-trunk-ubuntu22.04-Release+Asserts-x86.arm.wasm.tar.gz
 
   linux-build-ispc-llvm-trunk:
-    needs: [linux-build-llvm-trunk-2]
-    runs-on: ubuntu-latest
+    needs: [linux-build-llvm-trunk]
+    runs-on: ubuntu-22.04
     env:
       LLVM_VERSION: "trunk"
-      LLVM_TAR: llvm-trunk-ubuntu18.04-Release+Asserts-x86.arm.wasm.tar.gz
+      LLVM_TAR: llvm-trunk-ubuntu22.04-Release+Asserts-x86.arm.wasm.tar.gz
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       with:
         submodules: true
 
     - name: Download package
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
       with:
         name: llvm_trunk_linux
 
@@ -107,7 +82,6 @@ jobs:
 
     - name: Check environment
       run: |
-        ./check_env.py
         which -a clang
         cat /proc/cpuinfo
 
@@ -120,28 +94,70 @@ jobs:
         .github/workflows/scripts/check-ispc.sh
 
     - name: Upload package
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
       with:
         name: ispc_llvm_trunk_linux
         path: build/ispc-trunk-linux.tar.gz
 
   linux-test-llvm-trunk:
     needs: [linux-build-ispc-llvm-trunk]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     continue-on-error: false
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86, x86-64]
         target: [sse2-i32x4, sse2-i32x8,
                  sse4-i8x16, sse4-i16x8, sse4-i32x4, sse4-i32x8,
                  avx1-i32x4, avx1-i32x8, avx1-i32x16, avx1-i64x4,
                  avx2-i8x32, avx2-i16x16, avx2-i32x4, avx2-i32x8, avx2-i32x16, avx2-i64x4,
-                 avx512knl-x16,
-                 avx512skx-x4, avx512skx-x8, avx512skx-x16, avx512skx-x64, avx512skx-x32]
+                 avx2vnni-i32x4, avx2vnni-i32x8, avx2vnni-i32x16,
+                 avx512skx-x4, avx512skx-x8, avx512skx-x16, avx512skx-x64, avx512skx-x32,
+                 avx512icl-x4, avx512icl-x8, avx512icl-x16, avx512icl-x64, avx512icl-x32,
+                 avx512spr-x4, avx512spr-x8, avx512spr-x16, avx512spr-x64, avx512spr-x32]
+        # See issue #2818 for more deatils. It's SDE problem running on AMD runner.
+        exclude:
+          - arch: x86
+            target: "avx2vnni-i32x4"
+          - arch: x86
+            target: "avx2vnni-i32x8"
+          - arch: x86
+            target: "avx2vnni-i32x16"
+          - arch: x86
+            target: "avx512skx-x4"
+          - arch: x86
+            target: "avx512skx-x8"
+          - arch: x86
+            target: "avx512skx-x16"
+          - arch: x86
+            target: "avx512skx-x32"
+          - arch: x86
+            target: "avx512skx-x64"
+          - arch: x86
+            target: "avx512icl-x4"
+          - arch: x86
+            target: "avx512icl-x8"
+          - arch: x86
+            target: "avx512icl-x16"
+          - arch: x86
+            target: "avx512icl-x32"
+          - arch: x86
+            target: "avx512icl-x64"
+          - arch: x86
+            target: "avx512spr-x4"
+          - arch: x86
+            target: "avx512spr-x8"
+          - arch: x86
+            target: "avx512spr-x16"
+          - arch: x86
+            target: "avx512spr-x32"
+          - arch: x86
+            target: "avx512spr-x64"
+
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
     - name: Download package
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
       with:
         name: ispc_llvm_trunk_linux
 
@@ -155,20 +171,20 @@ jobs:
 
     - name: Running tests
       run: |
-        echo PATH=$PATH
-        ./alloy.py -r --only="stability current -O0 -O1 -O2" --only-targets="${{ matrix.target }}" --time --update-errors=FP
+        echo PATH="$PATH"
+        ./scripts/alloy.py -r --only="stability ${{ matrix.arch }} current -O0 -O1 -O2" --only-targets="${{ matrix.target }}" --time --update-errors=FP
 
     - name: Upload fail_db.txt
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
       if: failure()
       with:
         name: fail_db.${{matrix.target}}.txt
-        path: fail_db.txt
+        path: tests/fail_db.txt
 
     - name: Check
       run: |
         # Print fails to the log.
         git diff
         # Exit with error code if there are fails.
-        [ -z "`git diff`" ]
+        [ -z "$(git diff)" ]
 

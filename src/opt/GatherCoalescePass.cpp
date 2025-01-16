@@ -1,41 +1,13 @@
 /*
-  Copyright (c) 2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2022-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 #include "GatherCoalescePass.h"
+#include "builtins-decl.h"
 
 namespace ispc {
-
-char GatherCoalescePass::ID = 0;
 
 /** Representation of a memory load that the gather coalescing code has
     decided to generate.
@@ -44,7 +16,7 @@ struct CoalescedLoadOp {
     CoalescedLoadOp(int64_t s, int c) {
         start = s;
         count = c;
-        load = element0 = element1 = NULL;
+        load = element0 = element1 = nullptr;
     }
 
     /** Starting offset of the load from the common base pointer (in terms
@@ -97,9 +69,10 @@ static bool lVectorLoadIsEfficient(std::set<int64_t>::iterator iter, std::set<in
         // What is the separation in offset values from the last element we
         // added to the set for this load?
         int64_t delta = *iter - lastAccepted;
-        if (delta > 3)
+        if (delta > 3) {
             // If there's too big a gap, then we won't issue the load
             return false;
+        }
 
         int64_t span = *iter - start + 1;
 
@@ -145,8 +118,9 @@ static bool lVectorLoadIsEfficient(std::set<int64_t>::iterator iter, std::set<in
             if (vectorWidth != 2 && (lastAccepted - start) > (vectorWidth / 2) && (*iter - lastAccepted) < pageSize) {
                 *newIter = iter;
                 return true;
-            } else
+            } else {
                 return false;
+            }
         }
 
         // Continue moving forward
@@ -166,8 +140,9 @@ static bool lVectorLoadIsEfficient(std::set<int64_t>::iterator iter, std::set<in
 static void lSelectLoads(const std::vector<int64_t> &loadOffsets, std::vector<CoalescedLoadOp> *loads) {
     // First, get a sorted set of unique offsets to load from.
     std::set<int64_t> allOffsets;
-    for (unsigned int i = 0; i < loadOffsets.size(); ++i)
+    for (unsigned int i = 0; i < loadOffsets.size(); ++i) {
         allOffsets.insert(loadOffsets[i]);
+    }
 
     std::set<int64_t>::iterator iter = allOffsets.begin();
     while (iter != allOffsets.end()) {
@@ -235,8 +210,9 @@ static void lCoalescePerfInfo(const std::vector<llvm::CallInst *> &coalesceGroup
                 char buf[32];
                 snprintf(buf, sizeof(buf), "%d", p.first_line);
                 strncat(otherPositions, buf, sizeof(otherPositions) - strlen(otherPositions) - 1);
-                if (i < (int)coalesceGroup.size() - 1)
+                if (i < (int)coalesceGroup.size() - 1) {
                     strncat(otherPositions, ", ", sizeof(otherPositions) - strlen(otherPositions) - 1);
+                }
             }
         }
         strncat(otherPositions, ") ", sizeof(otherPositions) - strlen(otherPositions) - 1);
@@ -244,8 +220,9 @@ static void lCoalescePerfInfo(const std::vector<llvm::CallInst *> &coalesceGroup
 
     // Count how many loads of each size there were.
     std::map<int, int> loadOpsCount;
-    for (int i = 0; i < (int)loadOps.size(); ++i)
+    for (int i = 0; i < (int)loadOps.size(); ++i) {
         ++loadOpsCount[loadOps[i].count];
+    }
 
     // Generate a string the describes the mix of load ops
     char loadOpsInfo[512];
@@ -259,20 +236,22 @@ static void lCoalescePerfInfo(const std::vector<llvm::CallInst *> &coalesceGroup
         }
         strncat(loadOpsInfo, buf, sizeof(loadOpsInfo) - strlen(loadOpsInfo) - 1);
         ++iter;
-        if (iter != loadOpsCount.end())
+        if (iter != loadOpsCount.end()) {
             strncat(loadOpsInfo, ", ", sizeof(loadOpsInfo) - strlen(loadOpsInfo) - 1);
+        }
     }
 
     if (g->opt.level > 0) {
-        if (coalesceGroup.size() == 1)
+        if (coalesceGroup.size() == 1) {
             PerformanceWarning(pos, "Coalesced gather into %d load%s (%s).", (int)loadOps.size(),
                                (loadOps.size() > 1) ? "s" : "", loadOpsInfo);
-        else
+        } else {
             PerformanceWarning(pos,
                                "Coalesced %d gathers starting here %sinto %d "
                                "load%s (%s).",
                                (int)coalesceGroup.size(), otherPositions, (int)loadOps.size(),
                                (loadOps.size() > 1) ? "s" : "", loadOpsInfo);
+        }
     }
 }
 
@@ -285,14 +264,11 @@ static void lCoalescePerfInfo(const std::vector<llvm::CallInst *> &coalesceGroup
 static llvm::Value *lGEPAndLoad(llvm::Value *basePtr, llvm::Type *baseType, int64_t offset, int align,
                                 llvm::Instruction *insertBefore, llvm::Type *type) {
     llvm::Value *ptr = LLVMGEPInst(basePtr, baseType, LLVMInt64(offset), "new_base", insertBefore);
-    ptr = new llvm::BitCastInst(ptr, llvm::PointerType::get(type, 0), "ptr_cast", insertBefore);
-#if ISPC_LLVM_VERSION < ISPC_LLVM_11_0
-    return new llvm::LoadInst(ptr, "gather_load", false /* not volatile */, llvm::MaybeAlign(align), insertBefore);
-#else // LLVM 11.0+
+    ptr = new llvm::BitCastInst(ptr, llvm::PointerType::get(type, 0), "ptr_cast",
+                                ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
     Assert(llvm::isa<llvm::PointerType>(ptr->getType()));
     return new llvm::LoadInst(type, ptr, "gather_load", false /* not volatile */, llvm::MaybeAlign(align).valueOrOne(),
-                              insertBefore);
-#endif
+                              ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 }
 
 /* Having decided that we're doing to emit a series of loads, as encoded in
@@ -320,12 +296,14 @@ static void lEmitLoads(llvm::Value *basePtr, llvm::Type *baseType, std::vector<C
             // into two 32-bit parts.
             loadOps[i].load = lGEPAndLoad(basePtr, baseType, start, align, insertBefore, LLVMTypes::Int64Type);
             // element0 = (int32)value;
-            loadOps[i].element0 =
-                new llvm::TruncInst(loadOps[i].load, LLVMTypes::Int32Type, "load64_elt0", insertBefore);
+            loadOps[i].element0 = new llvm::TruncInst(loadOps[i].load, LLVMTypes::Int32Type, "load64_elt0",
+                                                      ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
             // element1 = (int32)(value >> 32)
-            llvm::Value *shift = llvm::BinaryOperator::Create(llvm::Instruction::LShr, loadOps[i].load, LLVMInt64(32),
-                                                              "load64_shift", insertBefore);
-            loadOps[i].element1 = new llvm::TruncInst(shift, LLVMTypes::Int32Type, "load64_elt1", insertBefore);
+            llvm::Value *shift =
+                llvm::BinaryOperator::Create(llvm::Instruction::LShr, loadOps[i].load, LLVMInt64(32), "load64_shift",
+                                             ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
+            loadOps[i].element1 = new llvm::TruncInst(shift, LLVMTypes::Int32Type, "load64_elt1",
+                                                      ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
             break;
         }
         case 4: {
@@ -372,8 +350,9 @@ static std::vector<CoalescedLoadOp> lSplit8WideLoads(const std::vector<Coalesced
 
             ret.push_back(CoalescedLoadOp(loadOps[i].start + 4, 4));
             ret.back().load = LLVMShuffleVectors(loadOps[i].load, loadOps[i].load, shuf[1], 4, insertBefore);
-        } else
+        } else {
             ret.push_back(loadOps[i]);
+        }
     }
 
     return ret;
@@ -393,7 +372,8 @@ static llvm::Value *lApplyLoad1(llvm::Value *result, const CoalescedLoadOp &load
             // If this load gives one of the values that we need, then we
             // can just insert it in directly
             Assert(set[elt] == false);
-            result = llvm::InsertElementInst::Create(result, load.load, LLVMInt32(elt), "insert_load", insertBefore);
+            result = llvm::InsertElementInst::Create(result, load.load, LLVMInt32(elt), "insert_load",
+                                                     ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
             set[elt] = true;
         }
     }
@@ -421,15 +401,18 @@ static llvm::Value *lApplyLoad2(llvm::Value *result, const CoalescedLoadOp &load
 
             // In this case, we bitcast from a 4xi32 to a 2xi64 vector
             llvm::Type *vec2x64Type = LLVMVECTOR::get(LLVMTypes::Int64Type, 2);
-            result = new llvm::BitCastInst(result, vec2x64Type, "to2x64", insertBefore);
+            result =
+                new llvm::BitCastInst(result, vec2x64Type, "to2x64", ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 
             // And now we can insert the 64-bit wide value into the
             // appropriate elment
-            result = llvm::InsertElementInst::Create(result, load.load, LLVMInt32(elt / 2), "insert64", insertBefore);
+            result = llvm::InsertElementInst::Create(result, load.load, LLVMInt32(elt / 2), "insert64",
+                                                     ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 
             // And back to 4xi32.
             llvm::Type *vec4x32Type = LLVMVECTOR::get(LLVMTypes::Int32Type, 4);
-            result = new llvm::BitCastInst(result, vec4x32Type, "to4x32", insertBefore);
+            result =
+                new llvm::BitCastInst(result, vec4x32Type, "to4x32", ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 
             set[elt] = true;
             if (elt < 3) {
@@ -447,7 +430,8 @@ static llvm::Value *lApplyLoad2(llvm::Value *result, const CoalescedLoadOp &load
             // of the final vector
             Assert(set[elt] == false);
             llvm::Value *toInsert = (offsets[elt] == load.start) ? load.element0 : load.element1;
-            result = llvm::InsertElementInst::Create(result, toInsert, LLVMInt32(elt), "insert_load", insertBefore);
+            result = llvm::InsertElementInst::Create(result, toInsert, LLVMInt32(elt), "insert_load",
+                                                     ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
             set[elt] = true;
         }
         ++elt;
@@ -489,8 +473,9 @@ static llvm::Value *lApplyLoad4(llvm::Value *result, const CoalescedLoadOp &load
 
     // Now, issue a shufflevector instruction if any of the values from the
     // load we just considered were applicable.
-    if (shuf[0] != 4 || shuf[1] != 5 || shuf[2] != 6 || shuf[3] != 7)
+    if (shuf[0] != 4 || shuf[1] != 5 || shuf[2] != 6 || shuf[3] != 7) {
         result = LLVMShuffleVectors(load.load, result, shuf, 4, insertBefore);
+    }
 
     return result;
 }
@@ -536,8 +521,9 @@ static llvm::Value *lAssemble4Vector(const std::vector<CoalescedLoadOp> &loadOps
     Debug(SourcePos(), "Done with search for loads [%" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 "].", offsets[0],
           offsets[1], offsets[2], offsets[3]);
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; ++i) {
         Assert(set[i] == true);
+    }
 
     return result;
 }
@@ -547,7 +533,7 @@ static llvm::Value *lAssemble4Vector(const std::vector<CoalescedLoadOp> &loadOps
 static llvm::Value *lApplyLoad4s(llvm::Value *result, const std::vector<CoalescedLoadOp> &loadOps,
                                  const int64_t offsets[4], bool set[4], llvm::Instruction *insertBefore) {
     int32_t firstMatchElements[4] = {-1, -1, -1, -1};
-    const CoalescedLoadOp *firstMatch = NULL;
+    const CoalescedLoadOp *firstMatch = nullptr;
 
     Assert(llvm::isa<llvm::UndefValue>(result));
 
@@ -573,7 +559,7 @@ static llvm::Value *lApplyLoad4s(llvm::Value *result, const std::vector<Coalesce
 
         if (anyMatched) {
             if (llvm::isa<llvm::UndefValue>(result)) {
-                if (firstMatch == NULL) {
+                if (firstMatch == nullptr) {
                     firstMatch = &loadop;
                     for (int i = 0; i < 4; ++i)
                         firstMatchElements[i] = matchElements[i];
@@ -586,7 +572,7 @@ static llvm::Value *lApplyLoad4s(llvm::Value *result, const std::vector<Coalesce
                             shuffle[i] = 4 + matchElements[i];
                     }
                     result = LLVMShuffleVectors(firstMatch->load, loadop.load, shuffle, 4, insertBefore);
-                    firstMatch = NULL;
+                    firstMatch = nullptr;
                 }
             } else {
                 int32_t shuffle[4] = {-1, -1, -1, -1};
@@ -601,7 +587,7 @@ static llvm::Value *lApplyLoad4s(llvm::Value *result, const std::vector<Coalesce
         }
     }
 
-    if (firstMatch != NULL && llvm::isa<llvm::UndefValue>(result))
+    if (firstMatch != nullptr && llvm::isa<llvm::UndefValue>(result))
         return LLVMShuffleVectors(firstMatch->load, result, firstMatchElements, 4, insertBefore);
     else
         return result;
@@ -666,14 +652,15 @@ static void lAssembleResultVectors(const std::vector<CoalescedLoadOp> &loadOps,
     // LLVM's SSE/AVX code generators.
     Assert((constOffsets.size() % 4) == 0);
     std::vector<llvm::Value *> vec4s;
-    for (int i = 0; i < (int)constOffsets.size(); i += 4)
+    for (int i = 0; i < (int)constOffsets.size(); i += 4) {
         vec4s.push_back(lAssemble4Vector(loadOps, &constOffsets[i], insertBefore));
+    }
 
     // And now concatenate 1, 2, or 4 of the 4-wide vectors computed above
     // into 4, 8, or 16-wide final result vectors.
     int numGathers = constOffsets.size() / g->target->getVectorWidth();
     for (int i = 0; i < numGathers; ++i) {
-        llvm::Value *result = NULL;
+        llvm::Value *result = nullptr;
         switch (g->target->getVectorWidth()) {
         case 4:
             result = vec4s[i];
@@ -685,6 +672,35 @@ static void lAssembleResultVectors(const std::vector<CoalescedLoadOp> &loadOps,
             llvm::Value *v1 = LLVMConcatVectors(vec4s[4 * i], vec4s[4 * i + 1], insertBefore);
             llvm::Value *v2 = LLVMConcatVectors(vec4s[4 * i + 2], vec4s[4 * i + 3], insertBefore);
             result = LLVMConcatVectors(v1, v2, insertBefore);
+            break;
+        }
+        // The code for 32 and 64 width may be triggered when --opt=disable-gathers option is used.
+        case 32: {
+            llvm::Value *v1 = LLVMConcatVectors(vec4s[4 * i], vec4s[4 * i + 1], insertBefore);
+            llvm::Value *v2 = LLVMConcatVectors(vec4s[4 * i + 2], vec4s[4 * i + 3], insertBefore);
+            llvm::Value *v3 = LLVMConcatVectors(vec4s[4 * i + 4], vec4s[4 * i + 5], insertBefore);
+            llvm::Value *v4 = LLVMConcatVectors(vec4s[4 * i + 6], vec4s[4 * i + 7], insertBefore);
+            llvm::Value *res1 = LLVMConcatVectors(v1, v2, insertBefore);
+            llvm::Value *res2 = LLVMConcatVectors(v3, v4, insertBefore);
+            result = LLVMConcatVectors(res1, res2, insertBefore);
+            break;
+        }
+        case 64: {
+            llvm::Value *v1 = LLVMConcatVectors(vec4s[4 * i], vec4s[4 * i + 1], insertBefore);
+            llvm::Value *v2 = LLVMConcatVectors(vec4s[4 * i + 2], vec4s[4 * i + 3], insertBefore);
+            llvm::Value *v3 = LLVMConcatVectors(vec4s[4 * i + 4], vec4s[4 * i + 5], insertBefore);
+            llvm::Value *v4 = LLVMConcatVectors(vec4s[4 * i + 6], vec4s[4 * i + 7], insertBefore);
+            llvm::Value *v5 = LLVMConcatVectors(vec4s[4 * i + 8], vec4s[4 * i + 9], insertBefore);
+            llvm::Value *v6 = LLVMConcatVectors(vec4s[4 * i + 10], vec4s[4 * i + 11], insertBefore);
+            llvm::Value *v7 = LLVMConcatVectors(vec4s[4 * i + 12], vec4s[4 * i + 13], insertBefore);
+            llvm::Value *v8 = LLVMConcatVectors(vec4s[4 * i + 14], vec4s[4 * i + 15], insertBefore);
+            llvm::Value *res1 = LLVMConcatVectors(v1, v2, insertBefore);
+            llvm::Value *res2 = LLVMConcatVectors(v3, v4, insertBefore);
+            llvm::Value *res3 = LLVMConcatVectors(v5, v6, insertBefore);
+            llvm::Value *res4 = LLVMConcatVectors(v7, v8, insertBefore);
+            llvm::Value *res12 = LLVMConcatVectors(res1, res2, insertBefore);
+            llvm::Value *res34 = LLVMConcatVectors(res3, res4, insertBefore);
+            result = LLVMConcatVectors(res12, res34, insertBefore);
             break;
         }
         default:
@@ -709,11 +725,13 @@ static llvm::Value *lComputeBasePtr(llvm::CallInst *gatherInst, llvm::Type *base
     // checking for this in GatherCoalescePass::runOnBasicBlock().  Thus,
     // extract the first value and use that as a scalar.
     llvm::Value *variable = LLVMExtractFirstVectorElement(variableOffsets);
-    Assert(variable != NULL);
-    if (variable->getType() == LLVMTypes::Int64Type)
-        offsetScale = new llvm::ZExtInst(offsetScale, LLVMTypes::Int64Type, "scale_to64", insertBefore);
-    llvm::Value *offset =
-        llvm::BinaryOperator::Create(llvm::Instruction::Mul, variable, offsetScale, "offset", insertBefore);
+    Assert(variable != nullptr);
+    if (variable->getType() == LLVMTypes::Int64Type) {
+        offsetScale = new llvm::ZExtInst(offsetScale, LLVMTypes::Int64Type, "scale_to64",
+                                         ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
+    }
+    llvm::Value *offset = llvm::BinaryOperator::Create(llvm::Instruction::Mul, variable, offsetScale, "offset",
+                                                       ISPC_INSERTION_POINT_INSTRUCTION(insertBefore));
 
     return LLVMGEPInst(basePtr, baseType, offset, "new_base", insertBefore);
 }
@@ -733,13 +751,14 @@ static void lExtractConstOffsets(const std::vector<llvm::CallInst *> &coalesceGr
     int64_t *endPtr = &((*constOffsets)[0]);
     for (int i = 0; i < (int)coalesceGroup.size(); ++i, endPtr += width) {
         llvm::Value *offsets = coalesceGroup[i]->getArgOperand(3);
-        int nElts;
+        int nElts = 0;
         bool ok = LLVMExtractVectorInts(offsets, endPtr, &nElts);
         Assert(ok && nElts == width);
     }
 
-    for (int i = 0; i < (int)constOffsets->size(); ++i)
+    for (int i = 0; i < (int)constOffsets->size(); ++i) {
         (*constOffsets)[i] /= elementSize;
+    }
 }
 
 /** Actually do the coalescing.  We have a set of gathers all accessing
@@ -760,13 +779,14 @@ static bool lCoalesceGathers(const std::vector<llvm::CallInst *> &coalesceGroup,
 
     int elementSize = 0;
     if (coalesceGroup[0]->getType() == LLVMTypes::Int32VectorType ||
-        coalesceGroup[0]->getType() == LLVMTypes::FloatVectorType)
+        coalesceGroup[0]->getType() == LLVMTypes::FloatVectorType) {
         elementSize = 4;
-    else if (coalesceGroup[0]->getType() == LLVMTypes::Int64VectorType ||
-             coalesceGroup[0]->getType() == LLVMTypes::DoubleVectorType)
+    } else if (coalesceGroup[0]->getType() == LLVMTypes::Int64VectorType ||
+               coalesceGroup[0]->getType() == LLVMTypes::DoubleVectorType) {
         elementSize = 8;
-    else
+    } else {
         FATAL("Unexpected gather type in lCoalesceGathers");
+    }
 
     // Extract the constant offsets from the gathers into the constOffsets
     // vector: the first vectorWidth elements will be those for the first
@@ -801,11 +821,12 @@ static bool lCoalesceGathers(const std::vector<llvm::CallInst *> &coalesceGroup,
     Assert(results.size() == coalesceGroup.size());
     for (int i = 0; i < (int)results.size(); ++i) {
         llvm::Instruction *ir = llvm::dyn_cast<llvm::Instruction>(results[i]);
-        Assert(ir != NULL);
+        Assert(ir != nullptr);
 
         llvm::Type *origType = coalesceGroup[i]->getType();
-        if (origType != ir->getType())
-            ir = new llvm::BitCastInst(ir, origType, ir->getName(), coalesceGroup[i]);
+        if (origType != ir->getType()) {
+            ir = new llvm::BitCastInst(ir, origType, ir->getName(), ISPC_INSERTION_POINT_INSTRUCTION(coalesceGroup[i]));
+        }
 
         // Previously, all of the instructions to compute the final result
         // were into the basic block here; here we remove the very last one
@@ -828,22 +849,25 @@ static bool lCoalesceGathers(const std::vector<llvm::CallInst *> &coalesceGroup,
     memory. */
 static bool lInstructionMayWriteToMemory(llvm::Instruction *inst) {
     if (llvm::isa<llvm::StoreInst>(inst) || llvm::isa<llvm::AtomicRMWInst>(inst) ||
-        llvm::isa<llvm::AtomicCmpXchgInst>(inst))
+        llvm::isa<llvm::AtomicCmpXchgInst>(inst)) {
         // FIXME: we could be less conservative and try to allow stores if
         // we are sure that the pointers don't overlap..
         return true;
+    }
 
     // Otherwise, any call instruction that doesn't have an attribute
     // indicating it won't write to memory has to be treated as a potential
     // store.
     llvm::CallInst *ci = llvm::dyn_cast<llvm::CallInst>(inst);
-    if (ci != NULL) {
+    if (ci != nullptr) {
         llvm::Function *calledFunc = ci->getCalledFunction();
-        if (calledFunc == NULL)
+        if (calledFunc == nullptr) {
             return true;
+        }
 
-        if (calledFunc->onlyReadsMemory() || calledFunc->doesNotAccessMemory())
+        if (calledFunc->onlyReadsMemory() || calledFunc->doesNotAccessMemory()) {
             return false;
+        }
         return true;
     }
 
@@ -853,35 +877,43 @@ static bool lInstructionMayWriteToMemory(llvm::Instruction *inst) {
 bool GatherCoalescePass::coalesceGathersFactored(llvm::BasicBlock &bb) {
     DEBUG_START_BB("GatherCoalescePass");
 
+    llvm::Module *M = bb.getModule();
     llvm::Function *gatherFuncs[] = {
-        m->module->getFunction("__pseudo_gather_factored_base_offsets32_i32"),
-        m->module->getFunction("__pseudo_gather_factored_base_offsets32_float"),
-        m->module->getFunction("__pseudo_gather_factored_base_offsets64_i32"),
-        m->module->getFunction("__pseudo_gather_factored_base_offsets64_float"),
+        M->getFunction(builtin::__pseudo_gather_factored_base_offsets32_i32),
+        M->getFunction(builtin::__pseudo_gather_factored_base_offsets32_float),
+        M->getFunction(builtin::__pseudo_gather_factored_base_offsets64_i32),
+        M->getFunction(builtin::__pseudo_gather_factored_base_offsets64_float),
     };
     int nGatherFuncs = sizeof(gatherFuncs) / sizeof(gatherFuncs[0]);
 
     bool modifiedAny = false;
 
-restart:
-    for (llvm::BasicBlock::iterator iter = bb.begin(), e = bb.end(); iter != e; ++iter) {
+    // Note: we do modify instruction list during the traversal, so the iterator
+    // is moved forward before the instruction is processed.
+    for (llvm::BasicBlock::iterator iter = bb.begin(), e = bb.end(); iter != e;) {
+        llvm::BasicBlock::iterator curIter = iter++;
         // Iterate over all of the instructions and look for calls to
         // __pseudo_gather_factored_base_offsets{32,64}_{i32,float} calls.
-        llvm::CallInst *callInst = llvm::dyn_cast<llvm::CallInst>(&*iter);
-        if (callInst == NULL)
+        llvm::CallInst *callInst = llvm::dyn_cast<llvm::CallInst>(&*curIter);
+        if (callInst == nullptr) {
             continue;
+        }
 
         llvm::Function *calledFunc = callInst->getCalledFunction();
-        if (calledFunc == NULL)
+        if (calledFunc == nullptr) {
             continue;
+        }
 
-        int i;
-        for (i = 0; i < nGatherFuncs; ++i)
-            if (gatherFuncs[i] != NULL && calledFunc == gatherFuncs[i])
+        int i = 0;
+        for (i = 0; i < nGatherFuncs; ++i) {
+            if (gatherFuncs[i] != nullptr && calledFunc == gatherFuncs[i]) {
                 break;
-        if (i == nGatherFuncs)
+            }
+        }
+        if (i == nGatherFuncs) {
             // Doesn't match any of the types of gathers we care about
             continue;
+        }
 
         SourcePos pos;
         LLVMGetSourcePosFromMetadata(callInst, &pos);
@@ -904,11 +936,13 @@ restart:
         // Then and only then do we have a common base pointer with all
         // offsets from that constants (in which case we can potentially
         // coalesce).
-        if (GetMaskStatusFromValue(mask) != MaskStatus::all_on)
+        if (GetMaskStatusFromValue(mask) != MaskStatus::all_on) {
             continue;
+        }
 
-        if (!LLVMVectorValuesAllEqual(variableOffsets))
+        if (!LLVMVectorValuesAllEqual(variableOffsets)) {
             continue;
+        }
 
         // coalesceGroup stores the set of gathers that we're going to try to
         // coalesce over
@@ -919,25 +953,26 @@ restart:
         // look at the remainder of instructions in the basic block (up
         // until we reach a write to memory) to try to find any other
         // gathers that can coalesce with this one.
-        llvm::BasicBlock::iterator fwdIter = iter;
+        llvm::BasicBlock::iterator fwdIter = curIter;
         ++fwdIter;
         for (; fwdIter != bb.end(); ++fwdIter) {
             // Must stop once we come to an instruction that may write to
             // memory; otherwise we could end up moving a read before this
             // write.
-            if (lInstructionMayWriteToMemory(&*fwdIter))
+            if (lInstructionMayWriteToMemory(&*fwdIter)) {
                 break;
+            }
 
             llvm::CallInst *fwdCall = llvm::dyn_cast<llvm::CallInst>(&*fwdIter);
-            if (fwdCall == NULL || fwdCall->getCalledFunction() != calledFunc)
+            if (fwdCall == nullptr || fwdCall->getCalledFunction() != calledFunc) {
                 continue;
+            }
 
             SourcePos fwdPos;
             // TODO: need to redesign metadata attached to pseudo calls,
             // LLVM drops metadata frequently and it results in bad disgnostics.
             LLVMGetSourcePosFromMetadata(fwdCall, &fwdPos);
 
-#ifndef ISPC_NO_DUMPS
             if (g->debugPrint) {
                 if (base != fwdCall->getArgOperand(0)) {
                     Debug(fwdPos, "base pointers mismatch");
@@ -960,21 +995,29 @@ restart:
                     LLVMDumpValue(fwdCall->getArgOperand(4));
                 }
             }
-#endif
 
             if (base == fwdCall->getArgOperand(0) && variableOffsets == fwdCall->getArgOperand(1) &&
                 offsetScale == fwdCall->getArgOperand(2) && mask == fwdCall->getArgOperand(4)) {
                 Debug(fwdPos, "This gather can be coalesced.");
                 coalesceGroup.push_back(fwdCall);
+                // We deal with a group of instructions handled in a single pass of the optimization.
+                // "iter" points to the insturction which needs to be handled on the next iteration.
+                // By default it's the next instruction after the first one in the gorup.
+                // If this happens to be another group instruction, move further.
+                if (fwdCall == &*iter) {
+                    iter++;
+                }
 
-                if (coalesceGroup.size() == 4)
+                if (coalesceGroup.size() == 4) {
                     // FIXME: untested heuristic: don't try to coalesce
                     // over a window of more than 4 gathers, so that we
                     // don't cause too much register pressure and end up
                     // spilling to memory anyway.
                     break;
-            } else
+                }
+            } else {
                 Debug(fwdPos, "This gather doesn't match the initial one.");
+            }
         }
 
         Debug(pos, "Done with checking for matching gathers");
@@ -983,7 +1026,6 @@ restart:
         // into something more efficient than the original set of gathers.
         if (lCoalesceGathers(coalesceGroup, baseType)) {
             modifiedAny = true;
-            goto restart;
         }
     }
     DEBUG_END_BB("GatherCoalescePass");
@@ -991,17 +1033,22 @@ restart:
     return modifiedAny;
 }
 
-bool GatherCoalescePass::runOnFunction(llvm::Function &F) {
-    llvm::TimeTraceScope FuncScope("GatherCoalescePass::runOnFunction", F.getName());
+llvm::PreservedAnalyses GatherCoalescePass::run(llvm::Function &F, llvm::FunctionAnalysisManager &FAM) {
+    llvm::TimeTraceScope FuncScope("GatherCoalescePass::run", F.getName());
 
     bool modifiedAny = false;
     for (llvm::BasicBlock &BB : F) {
         modifiedAny |= coalesceGathersFactored(BB);
     }
 
-    return modifiedAny;
-}
+    if (!modifiedAny) {
+        // No changes, all analyses are preserved.
+        return llvm::PreservedAnalyses::all();
+    }
 
-llvm::Pass *CreateGatherCoalescePass() { return new GatherCoalescePass; }
+    llvm::PreservedAnalyses PA;
+    PA.preserveSet<llvm::CFGAnalyses>();
+    return PA;
+}
 
 } // namespace ispc

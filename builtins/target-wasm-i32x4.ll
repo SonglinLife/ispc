@@ -1,33 +1,6 @@
-;;  Copyright (c) 2020, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2020-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 ;; Authors:
 ;; Anton Schreiner
@@ -39,7 +12,6 @@
 define(`WIDTH',`4')
 ;; FIXME: Workaround for "BUILD_OS should be defined to either UNIX or WINDOWS" error
 define(`BUILD_OS',`UNIX')
-define(`RUNTIME',`32')
 define(`MASK',`i32')
 define(`ISA',`WASM')
 ;; Wasm has custom clock function
@@ -49,12 +21,10 @@ include(`util.m4')
 
 stdlib_core()
 scans()
-rdrand_decls()
 define_shuffles()
+define_vector_permutations()
 aossoa()
 ctlztz()
-trigonometry_decl()
-transcendetals_decl()
 include(`svml.m4')
 svml_stubs(float,f,WIDTH)
 svml_stubs(double,d,WIDTH)
@@ -62,11 +32,11 @@ define_avgs()
 saturation_arithmetic()
 halfTypeGenericImplementation()
 
+;; rcp/rsqrt for double
+
+;; rcp/rsqrt for half
+
 declare <4 x double> @llvm.sqrt.v4f64(<4 x double>)
-declare float @__half_to_float_uniform(i16 %v) nounwind readnone
-declare <WIDTH x float> @__half_to_float_varying(<WIDTH x i16> %v) nounwind readnone
-declare i16 @__float_to_half_uniform(float %v) nounwind readnone
-declare <WIDTH x i16> @__float_to_half_varying(<WIDTH x float> %v) nounwind readnone
 declare i32 @llvm.wasm.anytrue.v4i32(<4 x i32>)
 declare i32 @llvm.wasm.alltrue.v4i32(<4 x i32>)
 declare <4 x float> @llvm.sqrt.v4f32(<4 x float>)
@@ -113,20 +83,6 @@ define i32 @__set_ftz_daz_flags() nounwind alwaysinline {
 
 define void @__restore_ftz_daz_flags(i32 %oldVal) nounwind alwaysinline {
   ret void
-}
-
-define <4 x double> @__rsqrt_varying_double(<4 x double> %v) nounwind readnone alwaysinline {
-entry:
-  %0 = tail call <4 x double> @llvm.sqrt.v4f64(<4 x double> %v)
-  %mul.i16 = fdiv <4 x double> <double 1.000000e+00, double 1.000000e+00, double 1.000000e+00, double 1.000000e+00>, %0
-  ret <4 x double> %mul.i16
-}
-
-define <4 x double> @__rsqrt_fast_varying_double(<4 x double> %v) nounwind readnone alwaysinline {
-entry:
-  %0 = tail call <4 x double> @llvm.sqrt.v4f64(<4 x double> %v)
-  %mul.i16 = fdiv <4 x double> <double 1.000000e+00, double 1.000000e+00, double 1.000000e+00, double 1.000000e+00>, %0
-  ret <4 x double> %mul.i16
 }
 
 define <WIDTH x double> @__sqrt_varying_double(<WIDTH x double>) nounwind readnone alwaysinline {
@@ -668,18 +624,6 @@ define  float @__rsqrt_fast_uniform_float(float) nounwind readonly alwaysinline 
   ret float %r
 }
 
-define  double @__rsqrt_uniform_double(double) nounwind readonly alwaysinline {
-  %s = call double @__sqrt_uniform_double(double %0)
-  %r = call double @__rcp_uniform_double(double %s)
-  ret double %r
-}
-
-define  double @__rsqrt_fast_uniform_double(double) nounwind readonly alwaysinline {
-  %s = call double @__sqrt_uniform_double(double %0)
-  %r = call double @__rcp_uniform_double(double %s)
-  ret double %r
-}
-
 define  float @__rcp_uniform_float(float) nounwind readonly alwaysinline {
   %r = fdiv float 1.,%0
   ret float %r
@@ -688,22 +632,6 @@ define  float @__rcp_uniform_float(float) nounwind readonly alwaysinline {
 define  float @__rcp_fast_uniform_float(float) nounwind readonly alwaysinline {
   %r = fdiv float 1.,%0
   ret float %r
-}
-
-define  double @__rcp_uniform_double(double) nounwind readonly alwaysinline {
-  %r = fdiv double 1.,%0
-  ret double %r
-}
-
-define  double @__rcp_fast_uniform_double(double) nounwind readonly alwaysinline {
-  %r = fdiv double 1.,%0
-  ret double %r
-}
-
-define <4 x double> @__rcp_varying_double(<4 x double> %x) {
-entry:
-  %0 = fdiv <4 x double> <double 1.000000e+00, double 1.000000e+00, double 1.000000e+00, double 1.000000e+00>, %x
-  ret <4 x double> %0
 }
 
 define i64 @__reduce_add_int64(<4 x i64>) nounwind readnone alwaysinline {

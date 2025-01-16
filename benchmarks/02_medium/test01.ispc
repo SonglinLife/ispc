@@ -1,3 +1,6 @@
+// Copyright (c) 2021-2024, Intel Corporation
+// SPDX-License-Identifier: BSD-3-Clause
+
 struct FVector {
     float V[3];
 };
@@ -5,7 +8,9 @@ struct FVector {
 inline uniform FVector Mul1(const uniform FVector &A, const uniform FVector &B) {
     uniform FVector Result;
 
-    foreach (i = 0 ... 3) { Result.V[i] = A.V[i] * B.V[i]; }
+    foreach (i = 0 ... 3) {
+        Result.V[i] = A.V[i] * B.V[i];
+    }
 
     return Result;
 }

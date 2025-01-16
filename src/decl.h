@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2010-2022, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2010-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file decl.h
@@ -57,6 +30,7 @@
 #include "ispc.h"
 
 #include <llvm/ADT/SmallVector.h>
+#include <variant>
 
 namespace ispc {
 
@@ -82,14 +56,94 @@ class Declarator;
 #define TYPEQUAL_VECTORCALL (1 << 10)
 #define TYPEQUAL_REGCALL (1 << 11)
 
+enum AttrArgKind { ATTR_ARG_UINT32, ATTR_ARG_STRING, ATTR_ARG_UNKNOWN };
+
+/** @brief Representation of an argument to an attribute.
+
+    Attribute can have an argument, which can be either an integer or a string.
+    This class is used to represent those arguments.
+ */
+class AttrArgument {
+  public:
+    AttrArgument();
+    AttrArgument(int64_t i);
+    AttrArgument(const std::string &s);
+
+    void Print() const;
+
+    AttrArgKind kind;
+    int64_t intVal;
+    std::string stringVal;
+};
+
+/** @brief Representation of a single attribute.
+
+    Attributes are used to provide additional information about a
+    declaration that isn't captured by the basic type, storage class, etc.
+    Its semantics are contained in the name and the argument, if any.
+ */
+class Attribute {
+  public:
+    Attribute(const std::string &n);
+    Attribute(const std::string &n, AttrArgument a);
+    Attribute(const Attribute &a);
+
+    /** Returns true if the attribute is known/supported false otherwise. */
+    bool IsKnownAttribute() const;
+
+    void Print() const;
+
+    std::string name;
+    AttrArgument arg;
+};
+
+/** @brief List of attributes associated with declaration/declarator/declspecs.
+
+    This class is used to hold a list of attributes that are associated with
+    a declaration.
+ */
+class AttributeList {
+  public:
+    AttributeList();
+    AttributeList(const AttributeList &attrList);
+    ~AttributeList();
+
+    /** Adds a new attribute to the list of attributes. It copies the
+        attribute and adds it to the list. */
+    void AddAttribute(const Attribute &a);
+
+    /** Returns true if the attribute with the given name exists, false
+        otherwise. */
+    bool HasAttribute(const std::string &name) const;
+
+    /** Returns the attribute with the given name if it exists, nullptr
+        otherwise. */
+    Attribute *GetAttribute(const std::string &name) const;
+
+    /** Merges the attributes from the given list into the current list.
+        It copies the attributes from the given list and adds them to the
+        current list. */
+    void MergeAttrList(const AttributeList &attrList);
+
+    /** Checks if the attributes are known/supported otherwise it will
+        issue a warning. */
+    void CheckForUnknownAttributes(SourcePos pos) const;
+
+    void Print() const;
+
+  private:
+    std::vector<Attribute *> attributes;
+};
+
 /** @brief Representation of the declaration specifiers in a declaration.
 
     In other words, this represents all of the stuff that applies to all of
     the (possibly multiple) variables in a declaration.
  */
-class DeclSpecs {
+class DeclSpecs : public Traceable {
   public:
-    DeclSpecs(const Type *t = NULL, StorageClass sc = SC_NONE, int tq = TYPEQUAL_NONE);
+    DeclSpecs(const Type *t = nullptr, StorageClass sc = SC_NONE, int tq = TYPEQUAL_NONE);
+    ~DeclSpecs();
 
     void Print() const;
 
@@ -110,7 +164,7 @@ class DeclSpecs {
     /** If this is a declaration with a vector type, this gives the vector
         width.  For non-vector types, this is zero.
      */
-    int vectorSize;
+    std::variant<std::monostate, int, Symbol *> vectorSize;
 
     /** If this is a declaration with an "soa<n>" qualifier, this gives the
         SOA width specified.  Otherwise this is zero.
@@ -118,6 +172,12 @@ class DeclSpecs {
     int soaWidth;
 
     std::vector<std::pair<std::string, SourcePos>> declSpecList;
+
+    /** Attributes associated with the declaration specifiers. */
+    AttributeList *attributeList;
+
+    /** Append copies of given attributes to the list of attributes. */
+    void AddAttrList(const AttributeList &attrList);
 };
 
 enum DeclaratorKind { DK_BASE, DK_POINTER, DK_REFERENCE, DK_ARRAY, DK_FUNCTION };
@@ -127,9 +187,10 @@ enum DeclaratorKind { DK_BASE, DK_POINTER, DK_REFERENCE, DK_ARRAY, DK_FUNCTION }
     In conjunction with an instance of the DeclSpecs, this gives us
     everything we need for a full variable declaration.
  */
-class Declarator {
+class Declarator : public Traceable {
   public:
     Declarator(DeclaratorKind dk, SourcePos p);
+    ~Declarator();
 
     /** Once a DeclSpecs instance is available, this method completes the
         initialization of the type member.
@@ -151,7 +212,7 @@ class Declarator {
         int). */
     const DeclaratorKind kind;
 
-    /** Child pointer if needed; this can only be non-NULL if the
+    /** Child pointer if needed; this can only be non-nullptr if the
         declarator's kind isn't DK_BASE. */
     Declarator *child;
 
@@ -162,17 +223,20 @@ class Declarator {
 
     /** For array declarators, this gives the declared size of the array.
         Unsized arrays have arraySize == 0. */
-    int arraySize;
+    std::variant<std::monostate, int, Symbol *> arraySize;
 
     /** Name associated with the declarator. */
     std::string name;
 
-    /** Initialization expression for the variable.  May be NULL. */
+    /** Initialization expression for the variable.  May be nullptr. */
     Expr *initExpr;
 
-    /** Type of the declarator.  This is NULL until InitFromDeclSpecs() or
+    /** Type of the declarator.  This is nullptr until InitFromDeclSpecs() or
         InitFromType() is called. */
     const Type *type;
+
+    /** Attributes associated with the declarator. */
+    AttributeList *attributeList;
 
     /** For function declarations, this holds the Declaration *s for the
         function's parameters. */
@@ -182,9 +246,9 @@ class Declarator {
 /** @brief Representation of a full declaration of one or more variables,
     including the shared DeclSpecs as well as the per-variable Declarators.
  */
-class Declaration {
+class Declaration : public Traceable {
   public:
-    Declaration(DeclSpecs *ds, std::vector<Declarator *> *dlist = NULL);
+    Declaration(DeclSpecs *ds, std::vector<Declarator *> *dlist = nullptr);
     Declaration(DeclSpecs *ds, Declarator *d);
 
     void Print() const;
@@ -207,8 +271,14 @@ class Declaration {
 
 /** The parser creates instances of StructDeclaration for the members of
     structs as it's parsing their declarations. */
-struct StructDeclaration {
+struct StructDeclaration : public Traceable {
     StructDeclaration(const Type *t, std::vector<Declarator *> *d) : type(t), declarators(d) {}
+    ~StructDeclaration() { delete declarators; }
+
+    // We don't copy these objects at the moment. If we will then proper
+    // implementations are needed considering the ownership of declarators.
+    StructDeclaration(const StructDeclaration &) = delete;
+    StructDeclaration &operator=(const StructDeclaration &) = delete;
 
     const Type *type;
     std::vector<Declarator *> *declarators;

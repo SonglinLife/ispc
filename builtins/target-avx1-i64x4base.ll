@@ -1,33 +1,6 @@
-;;  Copyright (c) 2013-2021, Intel Corporation
-;;  All rights reserved.
+;;  Copyright (c) 2013-2024, Intel Corporation
 ;;
-;;  Redistribution and use in source and binary forms, with or without
-;;  modification, are permitted provided that the following conditions are
-;;  met:
-;;
-;;    * Redistributions of source code must retain the above copyright
-;;      notice, this list of conditions and the following disclaimer.
-;;
-;;    * Redistributions in binary form must reproduce the above copyright
-;;      notice, this list of conditions and the following disclaimer in the
-;;      documentation and/or other materials provided with the distribution.
-;;
-;;    * Neither the name of Intel Corporation nor the names of its
-;;      contributors may be used to endorse or promote products derived from
-;;      this software without specific prior written permission.
-;;
-;;
-;;   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;;   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;;   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;;   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;;   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;;   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;;   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;;   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;;   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;;   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;;   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+;;  SPDX-License-Identifier: BSD-3-Clause
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Basic 4-wide definitions
@@ -43,6 +16,71 @@ int64minmax()
 saturation_arithmetic()
 
 include(`target-avx-utils.ll')
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; optimized shuf version
+
+shuffle1(i8)
+shuffle1(i16)
+shuffle1(half)
+shuffle1(double)
+shuffle1(i64)
+
+declare <4 x float> @llvm.x86.avx.vpermilvar.ps(<4 x float>, <4 x i32>)
+define <4 x i32> @__shuffle_i32(<4 x i32>, <4 x i32>) nounwind readnone alwaysinline {
+  %vec = bitcast <4 x i32> %0 to <4 x float>
+  %res = call <4 x float> @llvm.x86.avx.vpermilvar.ps(<4 x float> %vec, <4 x i32> %1)
+  %res_casted = bitcast <4 x float> %res to <4 x i32>
+  ret <4 x i32> %res_casted
+}
+
+define <4 x float> @__shuffle_float(<4 x float>, <4 x i32>) nounwind readnone alwaysinline {
+  %res = call <4 x float> @llvm.x86.avx.vpermilvar.ps(<4 x float> %0, <4 x i32> %1)
+  ret <4 x float> %res
+}
+
+define_shuffle2_const()
+
+shuffle2(i8)
+shuffle2(i16)
+shuffle2(half)
+shuffle2(double)
+shuffle2(i64)
+
+define <4 x i32> @__shuffle2_i32(<4 x i32>, <4 x i32>, <4 x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<4 x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <4 x i32> @__shuffle2_const_i32(<4 x i32> %0, <4 x i32> %1, <4 x i32> %2)
+  ret <4 x i32> %res_const
+
+not_const:
+  %v1 = call <4 x i32> @__shuffle_i32(<4 x i32> %0, <4 x i32> %2)
+  %perm2 = sub <4 x i32> %2, const_vector(i32, 4)
+  %v2 = call <4 x i32> @__shuffle_i32(<4 x i32> %1, <4 x i32> %perm2)
+  %mask = icmp slt <4 x i32> %2, const_vector(i32, 4)
+  %res = select <4 x i1> %mask, <4 x i32> %v1, <4 x i32> %v2
+  ret <4 x i32> %res
+}
+
+define <4 x float> @__shuffle2_float(<4 x float>, <4 x float>, <4 x i32>) nounwind readnone alwaysinline {
+  %isc = call i1 @__is_compile_time_constant_varying_int32(<4 x i32> %2)
+  br i1 %isc, label %is_const, label %not_const
+
+is_const:
+  %res_const = tail call <4 x float> @__shuffle2_const_float(<4 x float> %0, <4 x float> %1, <4 x i32> %2)
+  ret <4 x float> %res_const
+
+not_const:
+  %v1 = call <4 x float> @__shuffle_float(<4 x float> %0, <4 x i32> %2)
+  %perm2 = sub <4 x i32> %2, const_vector(i32, 4)
+  %v2 = call <4 x float> @__shuffle_float(<4 x float> %1, <4 x i32> %perm2)
+  %mask = icmp slt <4 x i32> %2, const_vector(i32, 4)
+  %res = select <4 x i1> %mask, <4 x float> %v1, <4 x float> %v2
+  ret <4 x float> %res
+}
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; rcp
@@ -516,8 +554,10 @@ define <4 x double> @__max_varying_double(<4 x double>, <4 x double>) nounwind r
   ret <4 x double> %call
 }
 
-rsqrtd_decl()
-rcpd_decl()
 
-transcendetals_decl()
-trigonometry_decl()
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; rcp/rsqrt declarations for half
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; dot product

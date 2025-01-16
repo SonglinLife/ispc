@@ -1,34 +1,7 @@
 /*
-  Copyright (c) 2019-2021, Intel Corporation
-  All rights reserved.
+  Copyright (c) 2019-2024, Intel Corporation
 
-  Redistribution and use in source and binary forms, with or without
-  modification, are permitted provided that the following conditions are
-  met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-
-    * Neither the name of Intel Corporation nor the names of its
-      contributors may be used to endorse or promote products derived from
-      this software without specific prior written permission.
-
-
-   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-   IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-   TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-   PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-   OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-   EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-   PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  SPDX-License-Identifier: BSD-3-Clause
 */
 
 /** @file bitcode_lib.cpp
@@ -36,25 +9,70 @@
            Builtiins-c, or ISPCTarget).
 */
 
+#include <stdlib.h>
+
 #include "bitcode_lib.h"
+#include "ispc.h"
 #include "target_registry.h"
+#include "util.h"
+
+#include "llvm/Support/MemoryBuffer.h"
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
 
 using namespace ispc;
 
-// Dispatch constructor
+// Dispatch constructors
 BitcodeLib::BitcodeLib(const unsigned char lib[], int size, TargetOS os)
-    : m_type(BitcodeLibType::Dispatch), m_lib(lib), m_size(size), m_os(os), m_arch(Arch::none),
-      m_target(ISPCTarget::none) {
+    : m_type(BitcodeLibType::Dispatch), m_storage(BitcodeLibStorage::Embedded), m_lib(lib), m_size(size), m_os(os),
+      m_arch(Arch::none), m_target(ISPCTarget::none) {
     TargetLibRegistry::RegisterTarget(this);
 }
-// Builtins-c constructor
+
+BitcodeLib::BitcodeLib(const char *filename, TargetOS os)
+    : m_type(BitcodeLibType::Dispatch), m_storage(BitcodeLibStorage::FileSystem), m_lib(nullptr), m_size(0), m_os(os),
+      m_arch(Arch::none), m_target(ISPCTarget::none), m_filename(filename) {
+    TargetLibRegistry::RegisterTarget(this);
+}
+
+// Builtins-c constructors
 BitcodeLib::BitcodeLib(const unsigned char lib[], int size, TargetOS os, Arch arch)
-    : m_type(BitcodeLibType::Builtins_c), m_lib(lib), m_size(size), m_os(os), m_arch(arch), m_target(ISPCTarget::none) {
+    : m_type(BitcodeLibType::Builtins_c), m_storage(BitcodeLibStorage::Embedded), m_lib(lib), m_size(size), m_os(os),
+      m_arch(arch), m_target(ISPCTarget::none) {
     TargetLibRegistry::RegisterTarget(this);
 }
-// ISPC-target constructor
+
+BitcodeLib::BitcodeLib(const char *filename, TargetOS os, Arch arch)
+    : m_type(BitcodeLibType::Builtins_c), m_storage(BitcodeLibStorage::FileSystem), m_lib(nullptr), m_size(0), m_os(os),
+      m_arch(arch), m_target(ISPCTarget::none), m_filename(filename) {
+    TargetLibRegistry::RegisterTarget(this);
+}
+
+// ISPC-target constructors
 BitcodeLib::BitcodeLib(const unsigned char lib[], int size, ISPCTarget target, TargetOS os, Arch arch)
-    : m_type(BitcodeLibType::ISPC_target), m_lib(lib), m_size(size), m_os(os), m_arch(arch), m_target(target) {
+    : m_type(BitcodeLibType::ISPC_target), m_storage(BitcodeLibStorage::Embedded), m_lib(lib), m_size(size), m_os(os),
+      m_arch(arch), m_target(target) {
+    TargetLibRegistry::RegisterTarget(this);
+}
+
+BitcodeLib::BitcodeLib(const char *filename, ISPCTarget target, TargetOS os, Arch arch)
+    : m_type(BitcodeLibType::ISPC_target), m_storage(BitcodeLibStorage::FileSystem), m_lib(nullptr), m_size(0),
+      m_os(os), m_arch(arch), m_target(target), m_filename(filename) {
+    TargetLibRegistry::RegisterTarget(this);
+}
+
+// General constructors
+BitcodeLib::BitcodeLib(BitcodeLibType type, const unsigned char lib[], int size, ISPCTarget target, TargetOS os,
+                       Arch arch)
+    : m_type(type), m_storage(BitcodeLibStorage::Embedded), m_lib(lib), m_size(size), m_os(os), m_arch(arch),
+      m_target(target) {
+    TargetLibRegistry::RegisterTarget(this);
+}
+
+BitcodeLib::BitcodeLib(BitcodeLibType type, const char *filename, ISPCTarget target, TargetOS os, Arch arch)
+    : m_type(type), m_storage(BitcodeLibStorage::FileSystem), m_lib(nullptr), m_size(0), m_os(os), m_arch(arch),
+      m_target(target), m_filename(filename) {
     TargetLibRegistry::RegisterTarget(this);
 }
 
@@ -78,12 +96,72 @@ void BitcodeLib::print() const {
                target.c_str(), arch.c_str());
         break;
     }
+    case BitcodeLibType::Stdlib: {
+        std::string target = ISPCTargetToString(m_target);
+        std::string arch = ArchToString(m_arch);
+        printf("Type: stdlib.      size: %zu, OS: %s, target: %s, arch(runtime) %s\n", m_size, os.c_str(),
+               target.c_str(), arch.c_str());
+        break;
+    }
     }
 }
 
 BitcodeLib::BitcodeLibType BitcodeLib::getType() const { return m_type; }
 const unsigned char *BitcodeLib::getLib() const { return m_lib; }
-const size_t BitcodeLib::getSize() const { return m_size; }
-const TargetOS BitcodeLib::getOS() const { return m_os; }
-const Arch BitcodeLib::getArch() const { return m_arch; }
-const ISPCTarget BitcodeLib::getISPCTarget() const { return m_target; }
+size_t BitcodeLib::getSize() const { return m_size; }
+TargetOS BitcodeLib::getOS() const { return m_os; }
+Arch BitcodeLib::getArch() const { return m_arch; }
+ISPCTarget BitcodeLib::getISPCTarget() const { return m_target; }
+const std::string &BitcodeLib::getFilename() const { return m_filename; }
+
+bool BitcodeLib::fileExists() const {
+    llvm::SmallString<128> filePath(g->shareDirPath);
+    llvm::sys::path::append(filePath, m_filename);
+    if (m_filename.empty()) {
+        // If filename is empty, it means that the library is embedded.
+        // So both true and false are meaningless, so return true to not fill
+        // the missedFiles in printSupportMatrix.
+        return true;
+    }
+    return llvm::sys::fs::exists(filePath);
+}
+
+llvm::Module *BitcodeLib::getLLVMModule() const {
+    switch (m_storage) {
+    case BitcodeLibStorage::FileSystem: {
+        llvm::SmallString<128> filePath(g->shareDirPath);
+        llvm::sys::path::append(filePath, m_filename);
+        llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> bufferOrErr = llvm::MemoryBuffer::getFile(filePath.str());
+        if (std::error_code EC = bufferOrErr.getError()) {
+            Error(SourcePos(), "Error reading bc_filename %s\n%s\n", m_filename.c_str(), EC.message().c_str());
+            exit(1);
+        }
+        llvm::Expected<std::unique_ptr<llvm::Module>> ModuleOrErr =
+            llvm::parseBitcodeFile(bufferOrErr->get()->getMemBufferRef(), *g->ctx);
+        if (!ModuleOrErr) {
+            Error(SourcePos(), "Error parsing bitcode from filename %s\n", m_filename.c_str());
+            exit(1);
+        } else {
+            llvm::Module *M = ModuleOrErr.get().release();
+            return M;
+        }
+        return nullptr;
+    }
+    case BitcodeLibStorage::Embedded: {
+        llvm::StringRef sb = llvm::StringRef((const char *)m_lib, m_size);
+        llvm::MemoryBufferRef bcBuf = llvm::MemoryBuffer::getMemBuffer(sb)->getMemBufferRef();
+        llvm::Expected<std::unique_ptr<llvm::Module>> ModuleOrErr = llvm::parseBitcodeFile(bcBuf, *g->ctx);
+        if (!ModuleOrErr) {
+            Error(SourcePos(), "Error parsing stdlib bitcode: %s", toString(ModuleOrErr.takeError()).c_str());
+            exit(1);
+        } else {
+            llvm::Module *M = ModuleOrErr.get().release();
+            return M;
+        }
+        return nullptr;
+    }
+    default:
+        Error(SourcePos(), "Error loading bitcode library\n");
+        exit(1);
+    }
+}

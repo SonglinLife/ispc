@@ -5,7 +5,6 @@ ispc
 ispc_test
 ispc_ref
 objs
-docs/doxygen
 docs/*.html
 tests*/*cpp
 tests*/*run
@@ -19,5 +18,5 @@ examples/*/ref
 examples/*/test
 *.swp
 check_isa.exe
-
+build*
 
